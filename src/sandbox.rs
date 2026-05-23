@@ -151,6 +151,9 @@ fn ensure_daemon_running(
         .arg(socket_path)
         .arg("--projects-root")
         .arg(projects_root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()?;
 
     // Wait for socket to appear (poll 5s), verify liveness via health check
