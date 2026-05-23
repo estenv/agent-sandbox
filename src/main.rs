@@ -23,7 +23,7 @@ enum CommandKind {
     Init,
     /// Prepare a known agent on the host, outside the sandbox.
     Prepare {
-        /// Known agent name: pi, opencode, or claude.
+        /// Known agent name: pi, opencode, or claude (also accepts pi-agent).
         agent: String,
     },
     /// Run any command inside the sandbox.

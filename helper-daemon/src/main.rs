@@ -70,6 +70,20 @@ fn handle_connection(mut stream: UnixStream, projects_root: Option<&Path>) -> st
     stream.flush()
 }
 
+fn ok_response(data: serde_json::Value) -> String {
+    let mut resp = serde_json::json!({"ok": true});
+    if let serde_json::Value::Object(ref mut obj) = resp {
+        if let serde_json::Value::Object(extra) = data {
+            obj.extend(extra);
+        }
+    }
+    resp.to_string()
+}
+
+fn err_response(error: impl Into<String>) -> String {
+    serde_json::json!({"ok": false, "error": error.into()}).to_string()
+}
+
 fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
     let line = line.trim_start_matches('/').trim();
     let mut parts = line.splitn(2, ' ');
@@ -77,48 +91,27 @@ fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
     let arg = parts.next().unwrap_or("").trim();
 
     match action {
-        "healthz" => serde_json::json!({
-            "ok": true,
-            "service": "agent-sandbox-helper-daemon",
-        })
-        .to_string(),
-        "test" => serde_json::json!({
-            "ok": true,
-            "message": "helper daemon connectivity works",
-        })
-        .to_string(),
+        "healthz" => ok_response(serde_json::json!({"service": "agent-sandbox-helper-daemon"})),
+        "test" => ok_response(serde_json::json!({"message": "helper daemon connectivity works"})),
         "git-pull" => {
             if arg.is_empty() {
-                return serde_json::json!({
-                    "ok": false,
-                    "error": "usage: git-pull <absolute-path>",
-                })
-                .to_string();
+                return err_response("usage: git-pull <absolute-path>");
             }
             let cwd = Path::new(arg);
             if !cwd.is_absolute() {
-                return serde_json::json!({
-                    "ok": false,
-                    "error": "path must be absolute",
-                })
-                .to_string();
+                return err_response("path must be absolute");
             }
             if let Some(root) = projects_root {
                 if !cwd.starts_with(root) {
-                    return serde_json::json!({
-                        "ok": false,
-                        "error": format!("path is outside allowed projects root: {}", cwd.display()),
-                    })
-                    .to_string();
+                    return err_response(format!(
+                        "path is outside allowed projects root: {}",
+                        cwd.display()
+                    ));
                 }
             }
             git_pull(cwd)
         }
-        _ => serde_json::json!({
-            "ok": false,
-            "error": "not found",
-        })
-        .to_string(),
+        _ => err_response("not found"),
     }
 }
 
@@ -134,11 +127,7 @@ fn git_pull(cwd: &Path) -> String {
             })
             .to_string()
         }
-        Err(e) => serde_json::json!({
-            "ok": false,
-            "error": format!("failed to execute git: {e}"),
-        })
-        .to_string(),
+        Err(e) => err_response(format!("failed to execute git: {e}")),
     }
 }
 

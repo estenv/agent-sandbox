@@ -4,14 +4,12 @@ use std::sync::atomic::AtomicU32;
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn host_home() -> PathBuf {
-    // The real host home — we must NOT use $HOME (which is overridden to the
-    // sandbox home by the time srt reads the settings), so read /etc/passwd or
-    // fall back to the env var that was set before launch.
-    if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home)
-    } else {
-        PathBuf::from("/home/as")
-    }
+    // The real host home. We must use this BEFORE srt spawns (while $HOME is
+    // still the real home), so we can expand ~ paths in the settings file
+    // before srt overrides $HOME inside the sandbox.
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .expect("HOME must be set") // N/A on Linux in practice
 }
 
 fn expand_tilde(path: &str, home: &Path) -> String {

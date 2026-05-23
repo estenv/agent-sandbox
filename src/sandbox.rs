@@ -89,21 +89,21 @@ pub fn run(
     Ok(exit_code(status.code()))
 }
 
-fn daemon_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(exe) = env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let candidate = parent.join("agent-sandbox-helper-daemon");
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-            return Err(format!(
-                "daemon binary not found next to this binary: expected {}",
-                candidate.display()
-            )
-            .into());
-        }
+fn sibling_binary(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let exe = env::current_exe()?;
+    let parent = exe
+        .parent()
+        .ok_or("cannot determine path of current executable")?;
+    let candidate = parent.join(name);
+    if candidate.exists() {
+        Ok(candidate)
+    } else {
+        Err(format!(
+            "binary not found next to this executable: expected {}",
+            candidate.display()
+        )
+        .into())
     }
-    Err("cannot determine path of current executable".into())
 }
 
 fn ensure_daemon(
@@ -119,7 +119,7 @@ fn ensure_daemon(
     }
 
     // Spawn daemon (must live next to the agent-sandbox binary)
-    let mut child = Command::new(daemon_binary()?)
+    let mut child = Command::new(sibling_binary("agent-sandbox-helper-daemon")?)
         .arg("--socket-path")
         .arg(socket_path)
         .arg("--projects-root")
@@ -178,33 +178,20 @@ pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn helper_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(exe) = env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let candidate = parent.join("agent-sandbox-helper");
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-            return Err(format!(
-                "helper binary not found next to this binary: expected {}",
-                candidate.display()
-            )
-            .into());
-        }
-    }
-    Err("cannot determine path of current executable".into())
-}
-
 fn configure_agent_runtime(workspace: &Path, command: &OsStr) -> io::Result<()> {
     let bin_dir = workspace.join("bin");
     fs::create_dir_all(&bin_dir)?;
 
     // Copy the helper binary into the sandbox
-    if let Ok(helper_src) = helper_binary() {
+    if let Ok(helper_src) = sibling_binary("agent-sandbox-helper") {
         let helper_dst = bin_dir.join("agent-sandbox-helper");
         let _ = fs::remove_file(&helper_dst);
         fs::copy(&helper_src, &helper_dst)?;
         make_executable(&helper_dst)?;
+    } else {
+        eprintln!(
+            "agent-sandbox: warning: helper binary not found — git-pull inside sandbox will fail"
+        );
     }
 
     match command_name(command).as_str() {
