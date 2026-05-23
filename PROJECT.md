@@ -135,9 +135,7 @@ The default policy further blocks `allowGitConfig: false` to prevent `git config
 
 ### Network
 
-SRT network access is allow-only by default. The default policy allowlists only `api.anthropic.com` for the initial Anthropic provider path, plus `localhost` and `127.0.0.1` for the helper daemon.
-
-The explicit deny list repeats high-risk destinations even though they are already blocked by omission. This makes the policy easier to audit and protects against accidental future broad allow rules because `deniedDomains` takes precedence over `allowedDomains`.
+SRT network access is allow-only by default. The default policy allowlists only `api.anthropic.com` for the initial Anthropic provider path, plus `localhost` and `127.0.0.1` for the helper daemon. Everything else is denied implicitly.
 
 The policy does not allow package registries or source-control remotes. Remote git operations (`git fetch`, `git push`, PR creation) are intentionally blocked — those belong in the future helper-daemon track.
 
