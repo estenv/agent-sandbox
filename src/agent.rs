@@ -32,9 +32,6 @@ fn npm_install_global(package: &str) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("npm install -g {package} failed"),
-        ))
+        Err(io::Error::other(format!("npm install -g {package} failed")))
     }
 }

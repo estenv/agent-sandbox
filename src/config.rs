@@ -87,4 +87,3 @@ fn home_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .ok_or_else(|| "HOME is not set".into())
 }
-

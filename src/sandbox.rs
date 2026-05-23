@@ -38,10 +38,7 @@ pub fn run(
         env::set_current_dir(&projects_root)?;
     }
 
-    let daemon_sock = sandbox_home.join(format!(
-        "daemon-{}.sock",
-        std::process::id()
-    ));
+    let daemon_sock = sandbox_home.join(format!("daemon-{}.sock", std::process::id()));
     let _daemon_guard = ensure_daemon(&daemon_sock)?;
 
     let dynamic_settings = policy::prepare_settings(&projects_root, &daemon_sock)?;
@@ -128,7 +125,7 @@ fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::
     // Wait for socket to appear (poll 5s), verify liveness via health check
     for _ in 0..50 {
         if let Ok(mut conn) = UnixStream::connect(socket_path) {
-            let _ = write!(conn, "GET /healthz HTTP/1.1\r\n\r\n");
+            let _ = writeln!(conn, "healthz");
             return Ok(DaemonGuard {
                 child,
                 socket_path: socket_path.to_owned(),
@@ -137,7 +134,10 @@ fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::
         // Check if daemon exited before socket was created
         if let Some(status) = child.try_wait()? {
             let mut stderr = String::new();
-            let _ = child.stderr.take().map(|mut s| s.read_to_string(&mut stderr));
+            let _ = child
+                .stderr
+                .take()
+                .map(|mut s| s.read_to_string(&mut stderr));
             return Err(format!("daemon exited prematurely with {status}: {stderr}").into());
         }
         thread::sleep(Duration::from_millis(100));
@@ -161,28 +161,49 @@ impl Drop for DaemonGuard {
 
 pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
     for name in [
-        "home", "config", "cache", "share", "tmp", "npm-cache",
-        "npm-prefix", "bin", "logs",
+        "home",
+        "config",
+        "cache",
+        "share",
+        "tmp",
+        "npm-cache",
+        "npm-prefix",
+        "bin",
+        "logs",
     ] {
         fs::create_dir_all(root.join(name))?;
     }
     Ok(())
 }
 
+fn helper_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join("agent-sandbox-helper");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            return Err(format!(
+                "helper binary not found next to this binary: expected {}",
+                candidate.display()
+            )
+            .into());
+        }
+    }
+    Err("cannot determine path of current executable".into())
+}
+
 fn configure_agent_runtime(workspace: &Path, command: &OsStr) -> io::Result<()> {
-    // Create daemon-curl helper for the agent
     let bin_dir = workspace.join("bin");
     fs::create_dir_all(&bin_dir)?;
-    let daemon_curl = bin_dir.join("daemon-curl");
-    let content = concat!(
-        "#!/usr/bin/env bash\n",
-        "set -euo pipefail\n",
-        ": \"${HELPER_DAEMON_SOCK:?FATAL: HELPER_DAEMON_SOCK is not set}\"\n",
-        "exec curl -fsS --unix-socket \"$HELPER_DAEMON_SOCK\" ",
-        "\"http://localhost${1}\" \"${@:2}\"\n",
-    );
-    fs::write(&daemon_curl, content)?;
-    make_executable(&daemon_curl)?;
+
+    // Copy the helper binary into the sandbox
+    if let Ok(helper_src) = helper_binary() {
+        let helper_dst = bin_dir.join("agent-sandbox-helper");
+        let _ = fs::remove_file(&helper_dst);
+        fs::copy(&helper_src, &helper_dst)?;
+        make_executable(&helper_dst)?;
+    }
 
     match command_name(command).as_str() {
         "opencode" => {
@@ -290,10 +311,7 @@ mod tests {
 
     #[test]
     fn test_command_name_path_uses_basename() {
-        assert_eq!(
-            command_name(&OsString::from("/usr/local/bin/node")),
-            "node"
-        );
+        assert_eq!(command_name(&OsString::from("/usr/local/bin/node")), "node");
     }
 
     #[test]

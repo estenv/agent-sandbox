@@ -199,10 +199,7 @@ mod tests {
             val.pointer("/filesystem/denyRead/1").unwrap(),
             "/home/user/.aws"
         );
-        assert_eq!(
-            val.pointer("/filesystem/allowWrite/0").unwrap(),
-            "."
-        );
+        assert_eq!(val.pointer("/filesystem/allowWrite/0").unwrap(), ".");
     }
 
     #[test]
@@ -220,7 +217,9 @@ mod tests {
     #[test]
     fn test_host_home_reads_env() {
         let result = host_home();
-        assert_eq!(result, std::path::PathBuf::from(std::env::var("HOME").unwrap()));
+        assert_eq!(
+            result,
+            std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        );
     }
 }
-

@@ -21,10 +21,7 @@ fn test_config_dir_default_when_xdg_unset() {
     let _guard = ScopedEnv::remove("XDG_CONFIG_HOME");
     let home = std::env::var("HOME").unwrap();
     let dir = agent_sandbox::config::config_dir().unwrap();
-    assert_eq!(
-        dir,
-        PathBuf::from(home).join(".config/agent-sandbox")
-    );
+    assert_eq!(dir, PathBuf::from(home).join(".config/agent-sandbox"));
 }
 
 #[test]
@@ -32,7 +29,17 @@ fn test_ensure_workspace_dirs() {
     let tmp = std::env::temp_dir().join("agent-sandbox-test-workspace");
     let _ = std::fs::remove_dir_all(&tmp);
     agent_sandbox::sandbox::ensure_workspace_dirs(&tmp).unwrap();
-    for name in ["home", "config", "cache", "share", "tmp", "npm-cache", "npm-prefix", "bin", "logs"] {
+    for name in [
+        "home",
+        "config",
+        "cache",
+        "share",
+        "tmp",
+        "npm-cache",
+        "npm-prefix",
+        "bin",
+        "logs",
+    ] {
         assert!(tmp.join(name).is_dir(), "missing dir: {name}");
     }
     std::fs::remove_dir_all(&tmp).unwrap();

@@ -1,7 +1,7 @@
 mod agent;
 mod config;
-mod sandbox;
 mod policy;
+mod sandbox;
 
 use clap::{Args, Parser, Subcommand};
 use std::ffi::OsString;
@@ -127,13 +127,8 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::
 
 fn healthcheck(args: HealthcheckArgs) -> Result<u8, Box<dyn std::error::Error>> {
     let command = vec![
-        OsString::from("daemon-curl"),
-        OsString::from("/healthz"),
+        OsString::from("agent-sandbox-helper"),
+        OsString::from("healthz"),
     ];
-    sandbox::run(
-        args.workspace,
-        args.projects_root,
-        true,
-        command,
-    )
+    sandbox::run(args.workspace, args.projects_root, true, command)
 }

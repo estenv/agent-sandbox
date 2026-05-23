@@ -7,7 +7,8 @@ Convenience wrapper around [Anthropic Sandbox Runtime](https://github.com/anthro
 | Crate | Path | Purpose |
 |-------|------|---------|
 | `agent-sandbox` | `src/` | CLI wrapper: config, policy generation, agent prep, sandbox launch |
-| `agent-sandbox-helper-daemon` | `helper-daemon/` | Host-side HTTP service for future privileged operations |
+| `agent-sandbox-helper-daemon` | `helper-daemon/` | Host-side daemon for privileged operations, communicates over Unix sockets |
+| `agent-sandbox-helper` | `helper-daemon/` | Unix socket client for agents inside the sandbox |
 
 ## Quick verification after changes
 
@@ -22,10 +23,8 @@ cargo fmt
 cargo clippy --fix --allow-dirty
 
 # Healthcheck (sandbox-daemon connectivity):
-# Terminal 1:
-cargo run -p agent-sandbox-helper-daemon
-# Terminal 2:
-cargo run -- doctor
+cargo build --workspace
+cargo run -- healthcheck
 ```
 
 ## Test rules

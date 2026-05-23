@@ -55,20 +55,12 @@ fn real_main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_request(first_line: &str) -> (&'static str, &'static str) {
-    match first_line {
-        line if line.starts_with("GET /healthz ") => (
-            "HTTP/1.1 200 OK",
-            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#,
-        ),
-        line if line.starts_with("GET /v1/test ") => (
-            "HTTP/1.1 200 OK",
-            r#"{"ok":true,"message":"helper daemon connectivity works"}"#,
-        ),
-        _ => (
-            "HTTP/1.1 404 Not Found",
-            r#"{"ok":false,"error":"not found"}"#,
-        ),
+fn handle_request(path: &str) -> &'static str {
+    let path = path.trim_start_matches('/');
+    match path {
+        "healthz" => r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#,
+        "v1/test" => r#"{"ok":true,"message":"helper daemon connectivity works"}"#,
+        _ => r#"{"ok":false,"error":"not found"}"#,
     }
 }
 
@@ -76,14 +68,9 @@ fn handle_connection(mut stream: UnixStream) -> std::io::Result<()> {
     let mut buffer = [0_u8; 4096];
     let n = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..n]);
-    let first_line = request.lines().next().unwrap_or_default();
-    let (status, body) = handle_request(first_line);
-
-    write!(
-        stream,
-        "{status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    )?;
+    let path = request.lines().next().unwrap_or_default().trim();
+    let body = handle_request(path);
+    stream.write_all(body.as_bytes())?;
     stream.flush()
 }
 
@@ -107,35 +94,50 @@ mod tests {
 
     #[test]
     fn test_handle_healthz() {
-        let (status, body) = handle_request("GET /healthz HTTP/1.1");
-        assert_eq!(status, "HTTP/1.1 200 OK");
-        assert_eq!(body, r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#);
+        let body = handle_request("healthz");
+        assert_eq!(
+            body,
+            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
+        );
+    }
+
+    #[test]
+    fn test_handle_healthz_with_slash() {
+        let body = handle_request("/healthz");
+        assert_eq!(
+            body,
+            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
+        );
     }
 
     #[test]
     fn test_handle_v1_test() {
-        let (status, body) = handle_request("GET /v1/test HTTP/1.1");
-        assert_eq!(status, "HTTP/1.1 200 OK");
-        assert_eq!(body, r#"{"ok":true,"message":"helper daemon connectivity works"}"#);
+        let body = handle_request("v1/test");
+        assert_eq!(
+            body,
+            r#"{"ok":true,"message":"helper daemon connectivity works"}"#
+        );
     }
 
     #[test]
     fn test_handle_not_found() {
-        let (status, body) = handle_request("GET /nonexistent HTTP/1.1");
-        assert_eq!(status, "HTTP/1.1 404 Not Found");
+        let body = handle_request("nonexistent");
         assert_eq!(body, r#"{"ok":false,"error":"not found"}"#);
     }
 
     #[test]
-    fn test_handle_empty_line_returns_404() {
-        let (status, _) = handle_request("");
-        assert_eq!(status, "HTTP/1.1 404 Not Found");
+    fn test_handle_empty_line_returns_not_found() {
+        let body = handle_request("");
+        assert_eq!(body, r#"{"ok":false,"error":"not found"}"#);
     }
 
     #[test]
-    fn test_handle_healthz_needs_trailing_space() {
-        let (status, _) = handle_request("GET /healthz");
-        assert_eq!(status, "HTTP/1.1 404 Not Found");
+    fn test_handle_healthz_bare_matches_without_http() {
+        let body = handle_request("healthz");
+        assert_eq!(
+            body,
+            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
+        );
     }
 
     #[test]
@@ -157,6 +159,9 @@ mod tests {
 
     #[test]
     fn test_resolve_path_relative() {
-        assert_eq!(resolve_path("relative/path"), PathBuf::from("relative/path"));
+        assert_eq!(
+            resolve_path("relative/path"),
+            PathBuf::from("relative/path")
+        );
     }
 }
