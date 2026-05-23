@@ -1,0 +1,91 @@
+{
+  "network": {
+    "allowedDomains": [
+      "api.anthropic.com",
+      "localhost",
+      "127.0.0.1"
+    ],
+    "deniedDomains": [
+      "github.com",
+      "*.github.com",
+      "gitlab.com",
+      "*.gitlab.com",
+      "dev.azure.com",
+      "*.visualstudio.com",
+      "npmjs.org",
+      "*.npmjs.org",
+      "registry.npmjs.org",
+      "pypi.org",
+      "files.pythonhosted.org",
+      "nuget.org",
+      "*.nuget.org",
+      "api.nuget.org",
+      "crates.io",
+      "static.crates.io",
+      "index.crates.io",
+      "registry-1.docker.io",
+      "auth.docker.io",
+      "ghcr.io",
+      "pkg.go.dev",
+      "proxy.golang.org",
+      "sum.golang.org"
+    ],
+    "allowUnixSockets": [],
+    "allowAllUnixSockets": false,
+    "allowLocalBinding": true
+  },
+  "filesystem": {
+    "denyRead": [
+      "~/.ssh",
+      "~/.gnupg",
+      "~/.aws",
+      "~/.azure",
+      "~/.config/gh",
+      "~/.config/github-copilot",
+      "~/.config/gcloud",
+      "~/.config/azure",
+      "~/.docker",
+      "~/.kube",
+      "~/.npmrc",
+      "~/.pypirc",
+      "~/.netrc",
+      "~/.cargo/credentials",
+      "~/.cargo/credentials.toml",
+      "~/.nuget",
+      "~/.m2/settings.xml",
+      "~/.gradle/gradle.properties",
+      "~/.local/share/opencode/auth.json",
+      ".env",
+      ".env.local",
+      ".envrc",
+      ".npmrc",
+      ".pypirc",
+      "NuGet.config",
+      "nuget.config"
+    ],
+    "allowRead": [],
+    "allowWrite": [
+      ".",
+      "~/.agent-sandbox",
+      "/tmp",
+      "/dev/shm"
+    ],
+    "denyWrite": [
+      ".env",
+      ".env.local",
+      ".envrc",
+      ".npmrc",
+      ".pypirc",
+      "NuGet.config",
+      "nuget.config",
+      ".git/config",
+      ".git/hooks",
+      ".github/workflows"
+    ],
+    "allowGitConfig": false
+  },
+  "ignoreViolations": {},
+  "mandatoryDenySearchDepth": 5,
+  "enableWeakerNestedSandbox": false,
+  "enableWeakerNetworkIsolation": false
+}
