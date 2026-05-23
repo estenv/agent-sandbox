@@ -259,3 +259,75 @@ fn command_name(command: &OsStr) -> String {
 fn exit_code(code: Option<i32>) -> u8 {
     code.unwrap_or(1).try_into().unwrap_or(1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn test_exit_code_normal() {
+        assert_eq!(exit_code(Some(0)), 0);
+        assert_eq!(exit_code(Some(1)), 1);
+        assert_eq!(exit_code(Some(42)), 42);
+    }
+
+    #[test]
+    fn test_exit_code_none_defaults_to_1() {
+        assert_eq!(exit_code(None), 1);
+    }
+
+    #[test]
+    fn test_exit_code_clamped_to_u8() {
+        assert_eq!(exit_code(Some(256)), 1);
+        assert_eq!(exit_code(Some(-1)), 1);
+    }
+
+    #[test]
+    fn test_command_name_simple() {
+        assert_eq!(command_name(&OsString::from("opencode")), "opencode");
+    }
+
+    #[test]
+    fn test_command_name_path_uses_basename() {
+        assert_eq!(
+            command_name(&OsString::from("/usr/local/bin/node")),
+            "node"
+        );
+    }
+
+    #[test]
+    fn test_command_name_empty() {
+        assert_eq!(command_name(&OsString::from("")), "");
+    }
+
+    #[test]
+    fn test_command_name_trailing_slash() {
+        assert_eq!(command_name(&OsString::from("/usr/bin/")), "bin");
+    }
+
+    #[test]
+    fn test_command_name_dot_slash() {
+        assert_eq!(command_name(&OsString::from("./foo")), "foo");
+    }
+
+    #[test]
+    fn test_which_absolute_path_exists() {
+        assert!(which("/bin/sh").is_some());
+    }
+
+    #[test]
+    fn test_which_absolute_path_missing() {
+        assert!(which("/nonexistent-binary-hopefully").is_none());
+    }
+
+    #[test]
+    fn test_which_searches_path() {
+        assert!(which("sh").is_some());
+    }
+
+    #[test]
+    fn test_which_unknown_not_found() {
+        assert!(which("this-command-should-not-exist-xyzzy").is_none());
+    }
+}

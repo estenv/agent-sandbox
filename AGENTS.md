@@ -27,3 +27,10 @@ cargo run -p agent-sandbox-helper-daemon
 # Terminal 2:
 cargo run -- doctor
 ```
+
+## Test rules
+
+- **All tests must live in `tests/` files** (per crate), never as `#[cfg(test)]` inline modules in source files.
+- Integration tests go in `tests/` under the crate root (`agent-sandbox/tests/`, `helper-daemon/tests/`).
+- Only test `pub` API from integration tests.
+- Never make a function `pub` just to test it. If a private method has a high-value test, use an inline `#[cfg(test)]` module instead.

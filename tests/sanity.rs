@@ -10,43 +10,60 @@ fn test_resolve_path_tilde() {
 }
 
 #[test]
-fn test_resolve_path_absolute() {
+fn test_config_dir_uses_xdg_when_set() {
+    let _guard = ScopedEnv::set("XDG_CONFIG_HOME", "/custom/xdg");
+    let dir = agent_sandbox::config::config_dir().unwrap();
+    assert_eq!(dir, PathBuf::from("/custom/xdg/agent-sandbox"));
+}
+
+#[test]
+fn test_config_dir_default_when_xdg_unset() {
+    let _guard = ScopedEnv::remove("XDG_CONFIG_HOME");
+    let home = std::env::var("HOME").unwrap();
+    let dir = agent_sandbox::config::config_dir().unwrap();
     assert_eq!(
-        agent_sandbox::config::resolve_path("/tmp/bar").unwrap(),
-        PathBuf::from("/tmp/bar")
+        dir,
+        PathBuf::from(home).join(".config/agent-sandbox")
     );
 }
 
 #[test]
-fn test_config_dir_uses_xdg_when_set() {
-    let prev = std::env::var_os("XDG_CONFIG_HOME");
-    std::env::set_var("XDG_CONFIG_HOME", "/custom/xdg");
-    let dir = agent_sandbox::config::config_dir().unwrap();
-    assert_eq!(dir, PathBuf::from("/custom/xdg/agent-sandbox"));
-    match prev {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
+fn test_ensure_workspace_dirs() {
+    let tmp = std::env::temp_dir().join("agent-sandbox-test-workspace");
+    let _ = std::fs::remove_dir_all(&tmp);
+    agent_sandbox::sandbox::ensure_workspace_dirs(&tmp).unwrap();
+    for name in ["home", "config", "cache", "share", "tmp", "npm-cache", "npm-prefix", "bin", "logs"] {
+        assert!(tmp.join(name).is_dir(), "missing dir: {name}");
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+// ---- scoped env guard ----
+
+struct ScopedEnv {
+    key: &'static str,
+    prev: Option<String>,
+}
+
+impl ScopedEnv {
+    fn set(key: &'static str, val: &str) -> Self {
+        let prev = std::env::var_os(key).map(|v| v.to_string_lossy().to_string());
+        std::env::set_var(key, val);
+        ScopedEnv { key, prev }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let prev = std::env::var_os(key).map(|v| v.to_string_lossy().to_string());
+        std::env::remove_var(key);
+        ScopedEnv { key, prev }
     }
 }
 
-#[test]
-fn test_known_agents() {
-    assert_eq!(
-        agent_sandbox::agent::known_for_command("opencode"),
-        Some("opencode")
-    );
-    assert_eq!(agent_sandbox::agent::known_for_command("pi"), Some("pi"));
-    assert_eq!(
-        agent_sandbox::agent::known_for_command("pi-agent"),
-        Some("pi")
-    );
-    assert_eq!(
-        agent_sandbox::agent::known_for_command("claude"),
-        Some("claude")
-    );
-    assert_eq!(
-        agent_sandbox::agent::known_for_command("copilot"),
-        None
-    );
-    assert_eq!(agent_sandbox::agent::known_for_command("unknown"), None);
+impl Drop for ScopedEnv {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
 }

@@ -1,4 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU32;
+
+static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn host_home() -> PathBuf {
     // The real host home — we must NOT use $HOME (which is overridden to the
@@ -144,10 +147,80 @@ pub fn prepare_settings(
     // before SRT overrides $HOME to the sandbox home.
     expand_tilde_in_arrays(&mut settings, &home);
 
-    let tmp_dir = std::env::temp_dir().join(format!("agent-sandbox-{}", std::process::id()));
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "agent-sandbox-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&tmp_dir)?;
     let tmp_path = tmp_dir.join("settings.json");
     std::fs::write(&tmp_path, serde_json::to_string_pretty(&settings)?)?;
     Ok(tmp_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_tilde_only() {
+        let home = Path::new("/home/user");
+        assert_eq!(expand_tilde("~", home), "/home/user");
+    }
+
+    #[test]
+    fn test_expand_tilde_path() {
+        let home = Path::new("/home/user");
+        assert_eq!(expand_tilde("~/foo/bar", home), "/home/user/foo/bar");
+    }
+
+    #[test]
+    fn test_expand_tilde_noop() {
+        let home = Path::new("/home/user");
+        assert_eq!(expand_tilde("/abs/path", home), "/abs/path");
+        assert_eq!(expand_tilde("relative/path", home), "relative/path");
+    }
+
+    #[test]
+    fn test_expand_tilde_in_strings() {
+        let home = Path::new("/home/user");
+        let mut val = serde_json::json!({
+            "filesystem": {
+                "denyRead": ["~/.ssh", "~/.aws"],
+                "allowWrite": ["."]
+            }
+        });
+        expand_tilde_in_arrays(&mut val, home);
+        assert_eq!(
+            val.pointer("/filesystem/denyRead/0").unwrap(),
+            "/home/user/.ssh"
+        );
+        assert_eq!(
+            val.pointer("/filesystem/denyRead/1").unwrap(),
+            "/home/user/.aws"
+        );
+        assert_eq!(
+            val.pointer("/filesystem/allowWrite/0").unwrap(),
+            "."
+        );
+    }
+
+    #[test]
+    fn test_expand_tilde_does_not_touch_non_strings() {
+        let home = Path::new("/home/user");
+        let mut val = serde_json::json!({
+            "count": 42,
+            "enabled": true
+        });
+        expand_tilde_in_arrays(&mut val, home);
+        assert_eq!(val.pointer("/count").unwrap(), 42);
+        assert_eq!(val.pointer("/enabled").unwrap(), true);
+    }
+
+    #[test]
+    fn test_host_home_reads_env() {
+        let result = host_home();
+        assert_eq!(result, std::path::PathBuf::from(std::env::var("HOME").unwrap()));
+    }
 }
 
