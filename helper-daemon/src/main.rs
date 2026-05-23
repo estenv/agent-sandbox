@@ -2,8 +2,8 @@ use clap::Parser;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
 
 #[derive(Debug, Parser)]
 #[command(name = "agent-sandbox-helper-daemon")]
@@ -13,6 +13,10 @@ struct Cli {
     /// Path to the Unix domain socket.
     #[arg(long, default_value = "~/.agent-sandbox/daemon.sock")]
     socket_path: String,
+
+    /// Restrict file operations to this root directory.
+    #[arg(long)]
+    projects_root: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -28,6 +32,7 @@ fn main() -> ExitCode {
 fn real_main() -> std::io::Result<()> {
     let cli = Cli::parse();
     let socket_path = resolve_path(&cli.socket_path);
+    let projects_root = cli.projects_root.as_deref().map(resolve_path);
 
     let _ = fs::remove_file(&socket_path);
 
@@ -44,7 +49,7 @@ fn real_main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(err) = handle_connection(stream) {
+                if let Err(err) = handle_connection(stream, projects_root.as_deref()) {
                     eprintln!("request failed: {err}");
                 }
             }
@@ -55,23 +60,86 @@ fn real_main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_request(path: &str) -> &'static str {
-    let path = path.trim_start_matches('/');
-    match path {
-        "healthz" => r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#,
-        "v1/test" => r#"{"ok":true,"message":"helper daemon connectivity works"}"#,
-        _ => r#"{"ok":false,"error":"not found"}"#,
-    }
-}
-
-fn handle_connection(mut stream: UnixStream) -> std::io::Result<()> {
+fn handle_connection(mut stream: UnixStream, projects_root: Option<&Path>) -> std::io::Result<()> {
     let mut buffer = [0_u8; 4096];
     let n = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..n]);
-    let path = request.lines().next().unwrap_or_default().trim();
-    let body = handle_request(path);
+    let line = request.lines().next().unwrap_or_default().trim().to_owned();
+    let body = handle_request(&line, projects_root);
     stream.write_all(body.as_bytes())?;
     stream.flush()
+}
+
+fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
+    let line = line.trim_start_matches('/').trim();
+    let mut parts = line.splitn(2, ' ');
+    let action = parts.next().unwrap_or("");
+    let arg = parts.next().unwrap_or("").trim();
+
+    match action {
+        "healthz" => serde_json::json!({
+            "ok": true,
+            "service": "agent-sandbox-helper-daemon",
+        })
+        .to_string(),
+        "test" => serde_json::json!({
+            "ok": true,
+            "message": "helper daemon connectivity works",
+        })
+        .to_string(),
+        "git-pull" => {
+            if arg.is_empty() {
+                return serde_json::json!({
+                    "ok": false,
+                    "error": "usage: git-pull <absolute-path>",
+                })
+                .to_string();
+            }
+            let cwd = Path::new(arg);
+            if !cwd.is_absolute() {
+                return serde_json::json!({
+                    "ok": false,
+                    "error": "path must be absolute",
+                })
+                .to_string();
+            }
+            if let Some(root) = projects_root {
+                if !cwd.starts_with(root) {
+                    return serde_json::json!({
+                        "ok": false,
+                        "error": format!("path is outside allowed projects root: {}", cwd.display()),
+                    })
+                    .to_string();
+                }
+            }
+            git_pull(cwd)
+        }
+        _ => serde_json::json!({
+            "ok": false,
+            "error": "not found",
+        })
+        .to_string(),
+    }
+}
+
+fn git_pull(cwd: &Path) -> String {
+    match Command::new("git").args(["pull"]).current_dir(cwd).output() {
+        Ok(output) => {
+            let exit_code = output.status.code().unwrap_or(-1);
+            serde_json::json!({
+                "ok": output.status.success(),
+                "exit_code": exit_code,
+                "stdout": String::from_utf8_lossy(&output.stdout),
+                "stderr": String::from_utf8_lossy(&output.stderr),
+            })
+            .to_string()
+        }
+        Err(e) => serde_json::json!({
+            "ok": false,
+            "error": format!("failed to execute git: {e}"),
+        })
+        .to_string(),
+    }
 }
 
 fn resolve_path(path: &str) -> PathBuf {
@@ -94,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_handle_healthz() {
-        let body = handle_request("healthz");
+        let body = handle_request("healthz", None);
         assert_eq!(
             body,
             r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
@@ -103,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_handle_healthz_with_slash() {
-        let body = handle_request("/healthz");
+        let body = handle_request("/healthz", None);
         assert_eq!(
             body,
             r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
@@ -111,29 +179,79 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_v1_test() {
-        let body = handle_request("v1/test");
+    fn test_handle_test_action() {
+        let body = handle_request("test", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["ok"].as_bool(), Some(true));
         assert_eq!(
-            body,
-            r#"{"ok":true,"message":"helper daemon connectivity works"}"#
+            v["message"].as_str().unwrap(),
+            "helper daemon connectivity works"
         );
     }
 
     #[test]
     fn test_handle_not_found() {
-        let body = handle_request("nonexistent");
-        assert_eq!(body, r#"{"ok":false,"error":"not found"}"#);
+        let body = handle_request("nonexistent", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(!v["ok"].as_bool().unwrap());
+        assert_eq!(v["error"].as_str().unwrap(), "not found");
     }
 
     #[test]
     fn test_handle_empty_line_returns_not_found() {
-        let body = handle_request("");
-        assert_eq!(body, r#"{"ok":false,"error":"not found"}"#);
+        let body = handle_request("", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(!v["ok"].as_bool().unwrap());
+        assert_eq!(v["error"].as_str().unwrap(), "not found");
+    }
+
+    #[test]
+    fn test_git_pull_missing_path() {
+        let body = handle_request("git-pull", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(!v["ok"].as_bool().unwrap());
+        assert_eq!(
+            v["error"].as_str().unwrap(),
+            "usage: git-pull <absolute-path>"
+        );
+    }
+
+    #[test]
+    fn test_git_pull_relative_path_rejected() {
+        let body = handle_request("git-pull relative/path", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(!v["ok"].as_bool().unwrap());
+        assert_eq!(v["error"].as_str().unwrap(), "path must be absolute");
+    }
+
+    #[test]
+    fn test_git_pull_outside_projects_root() {
+        let root = PathBuf::from("/allowed");
+        let body = handle_request("git-pull /forbidden", Some(root.as_path()));
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(!v["ok"].as_bool().unwrap());
+        assert!(v["error"]
+            .as_str()
+            .unwrap()
+            .contains("outside allowed projects root"));
+    }
+
+    #[test]
+    fn test_git_pull_non_git_dir() {
+        let body = handle_request("git-pull /tmp", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        // /tmp exists but is not a git repo — git should fail with exit code 128
+        assert!(!v["ok"].as_bool().unwrap());
+        assert_eq!(v["exit_code"].as_i64(), Some(128));
+        assert!(v["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("not a git repository"));
     }
 
     #[test]
     fn test_handle_healthz_bare_matches_without_http() {
-        let body = handle_request("healthz");
+        let body = handle_request("healthz", None);
         assert_eq!(
             body,
             r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#

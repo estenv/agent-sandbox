@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -39,7 +39,7 @@ pub fn run(
     }
 
     let daemon_sock = sandbox_home.join(format!("daemon-{}.sock", std::process::id()));
-    let _daemon_guard = ensure_daemon(&daemon_sock)?;
+    let _daemon_guard = ensure_daemon(&daemon_sock, &projects_root)?;
 
     let dynamic_settings = policy::prepare_settings(&projects_root, &daemon_sock)?;
 
@@ -73,6 +73,7 @@ pub fn run(
         .arg(&dynamic_settings)
         .arg("--")
         .args(&daemonized)
+        .stdin(Stdio::null())
         .env("HOME", sandbox_home.join("home"))
         .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
         .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
@@ -105,7 +106,10 @@ fn daemon_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Err("cannot determine path of current executable".into())
 }
 
-fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::Error>> {
+fn ensure_daemon(
+    socket_path: &Path,
+    projects_root: &Path,
+) -> Result<DaemonGuard, Box<dyn std::error::Error>> {
     // Clean up any stale socket with this exact path (from a prior crash)
     let _ = fs::remove_file(socket_path);
 
@@ -118,8 +122,11 @@ fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::
     let mut child = Command::new(daemon_binary()?)
         .arg("--socket-path")
         .arg(socket_path)
-        .stderr(Stdio::piped())
+        .arg("--projects-root")
+        .arg(projects_root)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()?;
 
     // Wait for socket to appear (poll 5s), verify liveness via health check
@@ -133,12 +140,7 @@ fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::
         }
         // Check if daemon exited before socket was created
         if let Some(status) = child.try_wait()? {
-            let mut stderr = String::new();
-            let _ = child
-                .stderr
-                .take()
-                .map(|mut s| s.read_to_string(&mut stderr));
-            return Err(format!("daemon exited prematurely with {status}: {stderr}").into());
+            return Err(format!("daemon exited prematurely with {status}").into());
         }
         thread::sleep(Duration::from_millis(100));
     }

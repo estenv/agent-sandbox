@@ -12,7 +12,10 @@ fn main() -> ExitCode {
         }
     };
 
-    let path = env::args().nth(1).unwrap_or_else(|| "healthz".to_string());
+    let mut path: String = env::args().skip(1).collect::<Vec<_>>().join(" ");
+    if path.is_empty() {
+        path = "healthz".to_string();
+    }
 
     let mut conn = match UnixStream::connect(&sock) {
         Ok(c) => c,
@@ -22,7 +25,7 @@ fn main() -> ExitCode {
         }
     };
 
-    if let Err(e) = write!(conn, "{path}\n") {
+    if let Err(e) = writeln!(conn, "{path}") {
         eprintln!("error: failed to send request: {e}");
         return ExitCode::from(1);
     }
