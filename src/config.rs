@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
 
-pub const DEFAULT_CONFIG_TOML: &str = r#"
-projects_root = "~/repos"
-sandbox_home = "~/.agent-sandbox"
-"#;
+pub const DEFAULT_CONFIG_JSON: &str = r#"{
+  "projects_root": "~/repos",
+  "sandbox_home": "~/.agent-sandbox"
+}"#;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WrapperConfig {
@@ -15,7 +15,7 @@ pub struct WrapperConfig {
 
 pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
     let config_dir = config_dir()?;
-    let config_path = config_dir.join("config.toml");
+    let config_path = config_dir.join("config.json");
     let settings_path = config_dir.join("settings.json");
     let workspace = resolve_path("~/.agent-sandbox")?;
 
@@ -23,7 +23,7 @@ pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
     crate::sandbox::ensure_workspace_dirs(&workspace)?;
 
     if !config_path.exists() {
-        std::fs::write(&config_path, DEFAULT_CONFIG_TOML)?;
+        std::fs::write(&config_path, DEFAULT_CONFIG_JSON)?;
         println!("created {}", config_path.display());
     } else {
         println!("config already exists: {}", config_path.display());
@@ -46,11 +46,11 @@ pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
 
 pub fn load_config() -> Result<WrapperConfig, Box<dyn std::error::Error>> {
     let config_dir = config_dir()?;
-    let config_path = config_dir.join("config.toml");
+    let config_path = config_dir.join("config.json");
 
     let mut config = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
-        toml::from_str(&content)?
+        serde_json::from_str(&content)?
     } else {
         WrapperConfig {
             projects_root: "~/repos".to_string(),
@@ -106,3 +106,4 @@ fn home_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .ok_or_else(|| "HOME is not set".into())
 }
+
