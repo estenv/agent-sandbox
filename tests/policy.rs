@@ -13,8 +13,9 @@ fn test_prepare_settings_expands_tilde() {
     f.flush().unwrap();
 
     let projects_root = PathBuf::from("/tmp/test-projects");
+    let daemon_sock = PathBuf::from("/home/as/.agent-sandbox/daemon.sock");
     let result =
-        agent_sandbox::policy::prepare_settings(&settings_path, &projects_root).unwrap();
+        agent_sandbox::policy::prepare_settings(&settings_path, &projects_root, &daemon_sock).unwrap();
 
     let content = std::fs::read_to_string(&result).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();

@@ -3,7 +3,9 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use crate::agent;
 use crate::config;
@@ -47,7 +49,13 @@ pub fn run(
         env::set_current_dir(&projects_root)?;
     }
 
-    let dynamic_settings = policy::prepare_settings(&settings_path, &projects_root)?;
+    let daemon_sock = sandbox_home.join(format!(
+        "daemon-{}.sock",
+        std::process::id()
+    ));
+    let _daemon_guard = ensure_daemon(&daemon_sock)?;
+
+    let dynamic_settings = policy::prepare_settings(&settings_path, &projects_root, &daemon_sock)?;
 
     ensure_workspace_dirs(&sandbox_home)?;
     configure_agent_runtime(&sandbox_home, &command[0])?;
@@ -60,11 +68,23 @@ pub fn run(
         }
     }
 
+    let mut daemonized: Vec<OsString> = Vec::new();
+    daemonized.push(OsString::from("env"));
+    daemonized.push(OsString::from(format!(
+        "HELPER_DAEMON_SOCK={}",
+        daemon_sock.display()
+    )));
+    daemonized.push(OsString::from(format!(
+        "PATH={}/bin:$PATH",
+        sandbox_home.display()
+    )));
+    daemonized.extend(command);
+
     let status = Command::new("srt")
         .arg("--settings")
         .arg(&dynamic_settings)
         .arg("--")
-        .args(&command)
+        .args(&daemonized)
         .env("HOME", sandbox_home.join("home"))
         .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
         .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
@@ -80,17 +100,53 @@ pub fn run(
     Ok(exit_code(status.code()))
 }
 
+fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::Error>> {
+    // Clean up any stale socket with this exact path (from a prior crash)
+    let _ = fs::remove_file(socket_path);
+
+    // Ensure parent directory exists
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Spawn daemon
+    let child = Command::new("agent-sandbox-helper-daemon")
+        .arg("--socket-path")
+        .arg(socket_path)
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    // Wait for socket to appear (poll 5s)
+    for _ in 0..50 {
+        if socket_path.exists() {
+            return Ok(DaemonGuard {
+                child,
+                socket_path: socket_path.to_owned(),
+            });
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    Err("daemon socket did not appear within 5s".into())
+}
+
+struct DaemonGuard {
+    child: Child,
+    socket_path: PathBuf,
+}
+
+impl Drop for DaemonGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = fs::remove_file(&self.socket_path);
+    }
+}
+
 pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
     for name in [
-        "home",
-        "config",
-        "cache",
-        "share",
-        "tmp",
-        "npm-cache",
-        "npm-prefix",
-        "bin",
-        "logs",
+        "home", "config", "cache", "share", "tmp", "npm-cache",
+        "npm-prefix", "bin", "logs",
     ] {
         fs::create_dir_all(root.join(name))?;
     }
@@ -98,6 +154,20 @@ pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
 }
 
 fn configure_agent_runtime(workspace: &Path, command: &OsStr) -> io::Result<()> {
+    // Create daemon-curl helper for the agent
+    let bin_dir = workspace.join("bin");
+    fs::create_dir_all(&bin_dir)?;
+    let daemon_curl = bin_dir.join("daemon-curl");
+    let content = concat!(
+        "#!/usr/bin/env bash\n",
+        "set -euo pipefail\n",
+        ": \"${HELPER_DAEMON_SOCK:?FATAL: HELPER_DAEMON_SOCK is not set}\"\n",
+        "exec curl -fsS --unix-socket \"$HELPER_DAEMON_SOCK\" ",
+        "\"http://localhost${1}\" \"${@:2}\"\n",
+    );
+    fs::write(&daemon_curl, content)?;
+    make_executable(&daemon_curl)?;
+
     match command_name(command).as_str() {
         "opencode" => {
             let cfg = workspace.join("config/opencode");

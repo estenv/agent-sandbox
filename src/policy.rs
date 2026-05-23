@@ -45,14 +45,12 @@ fn expand_tilde_in_arrays(value: &mut serde_json::Value, home: &Path) {
 pub const DEFAULT_SETTINGS_JSON: &str = r#"{
   "network": {
     "allowedDomains": [
-      "api.anthropic.com",
-      "localhost",
-      "127.0.0.1"
+      "api.anthropic.com"
     ],
     "deniedDomains": [],
     "allowUnixSockets": [],
-    "allowAllUnixSockets": false,
-    "allowLocalBinding": true
+    "allowAllUnixSockets": true,
+    "allowLocalBinding": false
   },
   "filesystem": {
     "denyRead": [
@@ -111,10 +109,26 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
 }
 "#;
 
-pub fn prepare_settings(base_path: &Path, projects_root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn prepare_settings(
+    base_path: &Path,
+    projects_root: &Path,
+    daemon_sock: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let home = host_home();
     let content = std::fs::read_to_string(base_path)?;
     let mut settings: serde_json::Value = serde_json::from_str(&content)?;
+
+    // Add the daemon socket's parent dir to allowWrite so bwrap bind-mounts it rw
+    if let Some(allow_write) = settings
+        .pointer_mut("/filesystem/allowWrite")
+        .and_then(|v| v.as_array_mut())
+    {
+        let sock_dir = daemon_sock.parent().unwrap();
+        let abs = sock_dir.to_string_lossy().to_string();
+        if !allow_write.iter().any(|v| v.as_str() == Some(&abs)) {
+            allow_write.push(abs.into());
+        }
+    }
 
     // Expand "." in allowWrite to the resolved projects root
     if let Some(allow_write) = settings

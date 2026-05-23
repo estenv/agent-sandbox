@@ -1,13 +1,11 @@
 {
   "network": {
     "allowedDomains": [
-      "api.anthropic.com",
-      "localhost",
-      "127.0.0.1"
+      "api.anthropic.com"
     ],
     "allowUnixSockets": [],
-    "allowAllUnixSockets": false,
-    "allowLocalBinding": true
+    "allowAllUnixSockets": true,
+    "allowLocalBinding": false
   },
   "filesystem": {
     "denyRead": [

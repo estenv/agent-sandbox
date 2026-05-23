@@ -1,16 +1,18 @@
 use clap::Parser;
+use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Debug, Parser)]
 #[command(name = "agent-sandbox-helper-daemon")]
-#[command(about = "No-op host helper daemon skeleton for agent-sandbox")]
+#[command(about = "Host helper daemon for agent-sandbox — listens on a Unix socket")]
 #[command(version)]
 struct Cli {
-    /// Address to bind.
-    #[arg(long, default_value = "127.0.0.1:47688")]
-    bind: String,
+    /// Path to the Unix domain socket.
+    #[arg(long, default_value = "~/.agent-sandbox/daemon.sock")]
+    socket_path: String,
 }
 
 fn main() -> ExitCode {
@@ -25,10 +27,20 @@ fn main() -> ExitCode {
 
 fn real_main() -> std::io::Result<()> {
     let cli = Cli::parse();
-    let listener = TcpListener::bind(&cli.bind)?;
+    let socket_path = resolve_path(&cli.socket_path);
+
+    // Clean up stale socket from a previous crash
+    let _ = fs::remove_file(&socket_path);
+
+    // Ensure parent directory exists
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let listener = UnixListener::bind(&socket_path)?;
     eprintln!(
-        "agent-sandbox-helper-daemon listening on http://{}",
-        cli.bind
+        "agent-sandbox-helper-daemon listening on {}",
+        socket_path.display()
     );
 
     for stream in listener.incoming() {
@@ -45,7 +57,7 @@ fn real_main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle_connection(mut stream: UnixStream) -> std::io::Result<()> {
     let mut buffer = [0_u8; 4096];
     let n = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..n]);
@@ -72,4 +84,18 @@ fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
         body.len()
     )?;
     stream.flush()
+}
+
+fn resolve_path(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix('~') {
+        if let Ok(home) = std::env::var("HOME") {
+            let home = PathBuf::from(home);
+            if rest.is_empty() || rest == "/" {
+                return home;
+            }
+            let rest = rest.trim_start_matches('/');
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path)
 }

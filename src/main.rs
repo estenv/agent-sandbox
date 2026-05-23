@@ -80,18 +80,12 @@ struct ShortcutArgs {
 
 #[derive(Debug, Args)]
 struct DocArgs {
-    /// SRT settings file. Defaults to ~/.config/agent-sandbox/settings.json.
     #[arg(long)]
     settings: Option<PathBuf>,
-    /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
-    /// Projects root directory. Defaults to the value in config.toml.
     #[arg(long)]
     projects_root: Option<PathBuf>,
-    /// Helper daemon URL to test.
-    #[arg(long, default_value = "http://localhost:47688/healthz")]
-    daemon_url: String,
 }
 
 fn main() -> ExitCode {
@@ -141,9 +135,8 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::
 
 fn doctor(args: DocArgs) -> Result<u8, Box<dyn std::error::Error>> {
     let command = vec![
-        OsString::from("curl"),
-        OsString::from("-fsS"),
-        OsString::from(&args.daemon_url),
+        OsString::from("daemon-curl"),
+        OsString::from("/healthz"),
     ];
     sandbox::run(
         args.settings,
