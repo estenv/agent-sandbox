@@ -12,6 +12,15 @@ fn unique_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("as-{label}-{n}"))
 }
 
+fn git() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "");
+    cmd
+}
+
 fn start_daemon() -> (DaemonGuard, PathBuf) {
     let dir = unique_dir("pr-test");
     std::fs::create_dir_all(&dir).unwrap();
@@ -95,31 +104,31 @@ fn git_init_bare_working() -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(&dir).unwrap();
 
     let bare = dir.join("bare.git");
-    Command::new("git")
+    git()
         .args(["init", "--bare"])
         .arg(&bare)
         .status()
         .expect("init bare repo");
 
     let working = dir.join("working");
-    Command::new("git")
+    git()
         .args(["clone", bare.to_str().unwrap()])
         .arg(&working)
         .status()
         .expect("clone bare repo");
 
     std::fs::write(working.join("README"), b"base").unwrap();
-    Command::new("git")
+    git()
         .args(["add", "README"])
         .current_dir(&working)
         .status()
         .expect("add");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "initial"])
         .current_dir(&working)
         .status()
         .expect("commit");
-    Command::new("git")
+    git()
         .args(["push", "-u", "origin", "master"])
         .current_dir(&working)
         .status()
@@ -130,7 +139,7 @@ fn git_init_bare_working() -> (PathBuf, PathBuf) {
 
 fn set_remote_to_ado(working: &PathBuf, org: &str, project: &str, repo: &str) {
     let url = format!("https://dev.azure.com/{org}/{project}/_git/{repo}");
-    Command::new("git")
+    git()
         .args(["remote", "set-url", "origin", &url])
         .current_dir(working)
         .status()
@@ -173,8 +182,7 @@ fn test_pr_create_no_remote() {
     let (_guard, sock) = start_daemon();
     let (_dir, working) = git_init_bare_working();
 
-    // Remove remote so git remote get-url origin fails
-    Command::new("git")
+    git()
         .args(["remote", "remove", "origin"])
         .current_dir(&working)
         .status()
@@ -203,25 +211,24 @@ fn test_pr_create_ado_remote_no_az() {
 
     set_remote_to_ado(&working, "myorg", "myproject", "myrepo");
 
-    // Create a feature branch
-    Command::new("git")
+    git()
         .args(["checkout", "-b", "feature-x"])
         .current_dir(&working)
         .status()
         .expect("checkout feature branch");
 
     std::fs::write(working.join("FEATURE"), b"new stuff").unwrap();
-    Command::new("git")
+    git()
         .args(["add", "FEATURE"])
         .current_dir(&working)
         .status()
         .expect("add feature");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "feature work"])
         .current_dir(&working)
         .status()
         .expect("commit feature");
-    Command::new("git")
+    git()
         .args(["push", "-u", "origin", "feature-x"])
         .current_dir(&working)
         .status()
@@ -237,7 +244,6 @@ fn test_pr_create_ado_remote_no_az() {
     let response = send_request(&sock, &format!("pr-create {json}"));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
 
-    // az may not be installed or authenticated — expect a clean error, not a crash
     assert!(!v["ok"].as_bool().unwrap());
     let err = v["error"].as_str().unwrap();
     assert!(

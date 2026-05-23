@@ -12,6 +12,15 @@ fn unique_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("as-{label}-{n}"))
 }
 
+fn git() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "");
+    cmd
+}
+
 fn start_daemon() -> (DaemonGuard, PathBuf) {
     let dir = unique_dir("push-test");
     std::fs::create_dir_all(&dir).unwrap();
@@ -103,37 +112,36 @@ fn test_git_push_rejects_main_or_master() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let bare = dir.join("bare.git");
-    Command::new("git")
+    git()
         .args(["init", "--bare"])
         .arg(&bare)
         .status()
         .expect("init bare repo");
 
     let working = dir.join("working");
-    Command::new("git")
+    git()
         .args(["clone", bare.to_str().unwrap()])
         .arg(&working)
         .status()
         .expect("clone bare repo");
 
     std::fs::write(working.join("README"), b"data").unwrap();
-    Command::new("git")
+    git()
         .args(["add", "README"])
         .current_dir(&working)
         .status()
         .expect("add");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "initial"])
         .current_dir(&working)
         .status()
         .expect("commit");
-    Command::new("git")
+    git()
         .args(["push", "-u", "origin", "master"])
         .current_dir(&working)
         .status()
         .expect("initial push");
 
-    // Try to push master via daemon — should be rejected
     let response = send_request(&sock, &format!("git-push {}", working.display()));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(
@@ -155,62 +163,59 @@ fn test_git_push_feature_branch_succeeds() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let bare = dir.join("bare.git");
-    Command::new("git")
+    git()
         .args(["init", "--bare"])
         .arg(&bare)
         .status()
         .expect("init bare repo");
 
     let working = dir.join("working");
-    Command::new("git")
+    git()
         .args(["clone", bare.to_str().unwrap()])
         .arg(&working)
         .status()
         .expect("clone bare repo");
 
-    // Initial commit on master, push to establish
     std::fs::write(working.join("README"), b"base").unwrap();
-    Command::new("git")
+    git()
         .args(["add", "README"])
         .current_dir(&working)
         .status()
         .expect("add");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "initial"])
         .current_dir(&working)
         .status()
         .expect("commit");
-    Command::new("git")
+    git()
         .args(["push", "-u", "origin", "master"])
         .current_dir(&working)
         .status()
         .expect("initial push");
 
-    // Create a feature branch
-    Command::new("git")
+    git()
         .args(["checkout", "-b", "feature-x"])
         .current_dir(&working)
         .status()
         .expect("checkout feature branch");
 
     std::fs::write(working.join("FEATURE"), b"new stuff").unwrap();
-    Command::new("git")
+    git()
         .args(["add", "FEATURE"])
         .current_dir(&working)
         .status()
         .expect("add feature");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "feature work"])
         .current_dir(&working)
         .status()
         .expect("commit feature");
-    Command::new("git")
+    git()
         .args(["push", "-u", "origin", "feature-x"])
         .current_dir(&working)
         .status()
         .expect("setup upstream");
 
-    // Now push via daemon — should succeed
     let response = send_request(&sock, &format!("git-push {}", working.display()));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(

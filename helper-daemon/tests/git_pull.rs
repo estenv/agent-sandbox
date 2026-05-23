@@ -12,6 +12,15 @@ fn unique_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("as-{label}-{n}"))
 }
 
+fn git() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "");
+    cmd
+}
+
 /// Start the daemon on a temp socket and return (guard, socket_path).
 fn start_daemon() -> (DaemonGuard, PathBuf) {
     let dir = unique_dir("test");
@@ -73,8 +82,6 @@ impl Drop for DaemonGuard {
 
 fn daemon_binary() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // In release: target/release/agent-sandbox-helper-daemon
-    // In debug:   target/debug/agent-sandbox-helper-daemon
     let profile = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -104,71 +111,63 @@ fn sealed_git_pull_scenarios() {
 fn test_git_pull_in_git_repo() {
     let (_guard, sock) = start_daemon();
 
-    // Create a test git repo to pull into
     let dir = unique_dir("test-repo");
     std::fs::create_dir_all(&dir).unwrap();
 
-    // Init a bare repo that will act as the remote
     let bare = dir.join("bare.git");
-    Command::new("git")
+    git()
         .args(["init", "--bare"])
         .arg(&bare)
         .status()
         .expect("init bare repo");
 
-    // Clone it to get a working copy
     let working = dir.join("working");
-    Command::new("git")
+    git()
         .args(["clone", bare.to_str().unwrap()])
         .arg(&working)
         .status()
         .expect("clone bare repo");
 
-    // Make an initial commit and push to establish the remote tracking branch
-    let readme = working.join("README");
-    std::fs::write(&readme, b"hello").unwrap();
-    Command::new("git")
+    std::fs::write(working.join("README"), b"hello").unwrap();
+    git()
         .args(["add", "README"])
         .current_dir(&working)
         .status()
         .expect("git add");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "initial"])
         .current_dir(&working)
         .status()
         .expect("git commit");
-    Command::new("git")
+    git()
         .args(["push", "origin", "master"])
         .current_dir(&working)
         .status()
         .expect("git push");
 
-    // Make a second commit in the bare repo (simulating upstream changes)
-    // We clone bare to a temp dir, add a commit, push back, then pull in working
     let updater = dir.join("updater");
-    Command::new("git")
+    git()
         .args(["clone", bare.to_str().unwrap()])
         .arg(&updater)
         .status()
         .expect("clone for updater");
     std::fs::write(updater.join("NEW"), b"world").unwrap();
-    Command::new("git")
+    git()
         .args(["add", "NEW"])
         .current_dir(&updater)
         .status()
         .expect("updater add");
-    Command::new("git")
+    git()
         .args(["commit", "-m", "second"])
         .current_dir(&updater)
         .status()
         .expect("updater commit");
-    Command::new("git")
+    git()
         .args(["push", "origin", "master"])
         .current_dir(&updater)
         .status()
         .expect("updater push");
 
-    // Now git-pull via daemon in the working copy
     let response = send_request(&sock, &format!("git-pull {}", working.display()));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(
@@ -177,10 +176,7 @@ fn test_git_pull_in_git_repo() {
     );
     assert_eq!(v["exit_code"].as_i64(), Some(0));
 
-    // Verify the new file is actually there
     assert!(working.join("NEW").exists(), "pulled file should exist");
-
-    // Cleanup
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -189,7 +185,6 @@ fn test_git_pull_outside_projects_root_rejected() {
     std::fs::create_dir_all(&dir).unwrap();
     let sock = dir.join("daemon.sock");
 
-    // Start daemon with a projects-root restriction
     let root = dir.join("allowed");
     std::fs::create_dir_all(&root).unwrap();
 
@@ -204,14 +199,12 @@ fn test_git_pull_outside_projects_root_rejected() {
         .spawn()
         .expect("start daemon");
 
-    // Drain daemon stderr to prevent pipe-buffer deadlock
     let mut daemon_stderr = child.stderr.take().unwrap();
     std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = daemon_stderr.read_to_end(&mut buf);
     });
 
-    // Poll
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if sock.exists() {
@@ -226,7 +219,6 @@ fn test_git_pull_outside_projects_root_rejected() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    // Request git-pull on a path outside the allowed root
     let response = send_request(&sock, &format!("git-pull /tmp"));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(!v["ok"].as_bool().unwrap());
@@ -235,7 +227,6 @@ fn test_git_pull_outside_projects_root_rejected() {
         .unwrap()
         .contains("outside allowed projects root"));
 
-    // Cleanup
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&dir);
