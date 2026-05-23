@@ -110,13 +110,11 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
 "#;
 
 pub fn prepare_settings(
-    base_path: &Path,
     projects_root: &Path,
     daemon_sock: &Path,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let home = host_home();
-    let content = std::fs::read_to_string(base_path)?;
-    let mut settings: serde_json::Value = serde_json::from_str(&content)?;
+    let mut settings: serde_json::Value = serde_json::from_str(DEFAULT_SETTINGS_JSON)?;
 
     // Add the daemon socket's parent dir to allowWrite so bwrap bind-mounts it rw
     if let Some(allow_write) = settings

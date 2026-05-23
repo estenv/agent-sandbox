@@ -1,7 +1,8 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io;
+use std::io::{self, Read, Write};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -12,30 +13,18 @@ use crate::config;
 use crate::policy;
 
 pub fn run(
-    settings_arg: Option<PathBuf>,
     workspace_arg: Option<PathBuf>,
     projects_root_arg: Option<PathBuf>,
     no_prepare: bool,
     command: Vec<OsString>,
 ) -> Result<u8, Box<dyn std::error::Error>> {
     let cfg = config::load_config()?;
-    let settings_path = settings_arg
-        .map(Ok)
-        .unwrap_or_else(config::settings_path)?;
     let projects_root = projects_root_arg
         .map(Ok)
         .unwrap_or_else(|| config::resolve_path(&cfg.projects_root))?;
     let sandbox_home = workspace_arg
         .map(Ok)
         .unwrap_or_else(|| config::resolve_path(&cfg.sandbox_home))?;
-
-    if !settings_path.exists() {
-        return Err(format!(
-            "settings file not found: {}. Run `agent-sandbox init` first.",
-            settings_path.display()
-        )
-        .into());
-    }
 
     fs::create_dir_all(&projects_root)?;
 
@@ -55,7 +44,7 @@ pub fn run(
     ));
     let _daemon_guard = ensure_daemon(&daemon_sock)?;
 
-    let dynamic_settings = policy::prepare_settings(&settings_path, &projects_root, &daemon_sock)?;
+    let dynamic_settings = policy::prepare_settings(&projects_root, &daemon_sock)?;
 
     ensure_workspace_dirs(&sandbox_home)?;
     configure_agent_runtime(&sandbox_home, &command[0])?;
@@ -74,9 +63,11 @@ pub fn run(
         "HELPER_DAEMON_SOCK={}",
         daemon_sock.display()
     )));
+    let current_path = env::var_os("PATH").unwrap_or_default();
     daemonized.push(OsString::from(format!(
-        "PATH={}/bin:$PATH",
-        sandbox_home.display()
+        "PATH={}/bin:{}",
+        sandbox_home.display(),
+        current_path.to_string_lossy()
     )));
     daemonized.extend(command);
 
@@ -110,19 +101,27 @@ fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::
     }
 
     // Spawn daemon
-    let child = Command::new("agent-sandbox-helper-daemon")
+    let mut child = Command::new("agent-sandbox-helper-daemon")
         .arg("--socket-path")
         .arg(socket_path)
         .stderr(Stdio::piped())
+        .stdout(Stdio::null())
         .spawn()?;
 
-    // Wait for socket to appear (poll 5s)
+    // Wait for socket to appear (poll 5s), verify liveness via health check
     for _ in 0..50 {
-        if socket_path.exists() {
+        if let Ok(mut conn) = UnixStream::connect(socket_path) {
+            let _ = write!(conn, "GET /healthz HTTP/1.1\r\n\r\n");
             return Ok(DaemonGuard {
                 child,
                 socket_path: socket_path.to_owned(),
             });
+        }
+        // Check if daemon exited before socket was created
+        if let Some(status) = child.try_wait()? {
+            let mut stderr = String::new();
+            let _ = child.stderr.take().map(|mut s| s.read_to_string(&mut stderr));
+            return Err(format!("daemon exited prematurely with {status}: {stderr}").into());
         }
         thread::sleep(Duration::from_millis(100));
     }

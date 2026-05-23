@@ -2,20 +2,10 @@ use std::path::PathBuf;
 
 #[test]
 fn test_prepare_settings_expands_tilde() {
-    use std::io::Write;
-
-    let dir = std::env::temp_dir().join("agent-sandbox-test-prepare");
-    let _ = std::fs::create_dir_all(&dir);
-    let settings_path = dir.join("settings.json");
-    let mut f = std::fs::File::create(&settings_path).unwrap();
-    f.write_all(agent_sandbox::policy::DEFAULT_SETTINGS_JSON.as_bytes())
-        .unwrap();
-    f.flush().unwrap();
-
     let projects_root = PathBuf::from("/tmp/test-projects");
     let daemon_sock = PathBuf::from("/home/as/.agent-sandbox/daemon.sock");
     let result =
-        agent_sandbox::policy::prepare_settings(&settings_path, &projects_root, &daemon_sock).unwrap();
+        agent_sandbox::policy::prepare_settings(&projects_root, &daemon_sock).unwrap();
 
     let content = std::fs::read_to_string(&result).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -56,8 +46,29 @@ fn test_prepare_settings_expands_tilde() {
         deny_read
     );
 
-    // Verify deniedDomains is present
+    // Verify network defaults
     assert!(parsed.pointer("/network/deniedDomains").is_some());
+    assert_eq!(
+        parsed
+            .pointer("/network/allowAllUnixSockets")
+            .unwrap()
+            .as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        parsed
+            .pointer("/network/allowLocalBinding")
+            .unwrap()
+            .as_bool(),
+        Some(false)
+    );
 
-    let _ = std::fs::remove_dir_all(&dir);
+    // Verify localhost is NOT in allowedDomains
+    let allowed = parsed
+        .pointer("/network/allowedDomains")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert!(!allowed.contains(&serde_json::Value::String("localhost".to_string())));
+    assert!(!allowed.contains(&serde_json::Value::String("127.0.0.1".to_string())));
 }

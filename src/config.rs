@@ -16,7 +16,6 @@ pub struct WrapperConfig {
 pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
     let config_dir = config_dir()?;
     let config_path = config_dir.join("config.json");
-    let settings_path = config_dir.join("settings.json");
     let workspace = resolve_path("~/.agent-sandbox")?;
 
     std::fs::create_dir_all(&config_dir)?;
@@ -29,18 +28,7 @@ pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
         println!("config already exists: {}", config_path.display());
     }
 
-    if !settings_path.exists() {
-        std::fs::write(&settings_path, crate::policy::DEFAULT_SETTINGS_JSON)?;
-        println!("created {}", settings_path.display());
-    } else {
-        println!("settings already exists: {}", settings_path.display());
-    }
-
     println!("sandbox workspace: {}", workspace.display());
-    println!(
-        "review settings before first real use: {}",
-        settings_path.display()
-    );
     Ok(0)
 }
 
@@ -73,13 +61,6 @@ pub fn config_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         return Ok(PathBuf::from(xdg).join("agent-sandbox"));
     }
     Ok(home_dir()?.join(".config/agent-sandbox"))
-}
-
-pub fn settings_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Some(path) = env::var_os("AGENT_SANDBOX_SETTINGS") {
-        return Ok(PathBuf::from(path));
-    }
-    Ok(config_dir()?.join("settings.json"))
 }
 
 pub fn resolve_path(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {

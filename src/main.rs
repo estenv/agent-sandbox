@@ -36,15 +36,12 @@ enum CommandKind {
     Claude(ShortcutArgs),
     /// Shortcut for `agent-sandbox run -- copilot ...`.
     Copilot(ShortcutArgs),
-    /// Run a quick connectivity check against the helper daemon from inside srt.
-    Doctor(DocArgs),
+    /// Run a connectivity health check inside the sandbox against the helper daemon.
+    Healthcheck(HealthcheckArgs),
 }
 
 #[derive(Debug, Args)]
 struct RunArgs {
-    /// SRT settings file. Defaults to ~/.config/agent-sandbox/settings.json.
-    #[arg(long)]
-    settings: Option<PathBuf>,
     /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
@@ -61,9 +58,6 @@ struct RunArgs {
 
 #[derive(Debug, Args)]
 struct ShortcutArgs {
-    /// SRT settings file. Defaults to ~/.config/agent-sandbox/settings.json.
-    #[arg(long)]
-    settings: Option<PathBuf>,
     /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
@@ -79,11 +73,11 @@ struct ShortcutArgs {
 }
 
 #[derive(Debug, Args)]
-struct DocArgs {
-    #[arg(long)]
-    settings: Option<PathBuf>,
+struct HealthcheckArgs {
+    /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
+    /// Projects root directory. Defaults to the value in config.toml.
     #[arg(long)]
     projects_root: Option<PathBuf>,
 }
@@ -107,7 +101,6 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
             Ok(0)
         }
         CommandKind::Run(args) => sandbox::run(
-            args.settings,
             args.workspace,
             args.projects_root,
             args.no_prepare,
@@ -117,7 +110,7 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
         CommandKind::Opencode(args) => run_shortcut("opencode", args),
         CommandKind::Claude(args) => run_shortcut("claude", args),
         CommandKind::Copilot(args) => run_shortcut("copilot", args),
-        CommandKind::Doctor(args) => doctor(args),
+        CommandKind::Healthcheck(args) => healthcheck(args),
     }
 }
 
@@ -125,7 +118,6 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::
     let mut command = vec![OsString::from(agent)];
     command.extend(shortcut.args);
     sandbox::run(
-        shortcut.settings,
         shortcut.workspace,
         shortcut.projects_root,
         shortcut.no_prepare,
@@ -133,13 +125,12 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::
     )
 }
 
-fn doctor(args: DocArgs) -> Result<u8, Box<dyn std::error::Error>> {
+fn healthcheck(args: HealthcheckArgs) -> Result<u8, Box<dyn std::error::Error>> {
     let command = vec![
         OsString::from("daemon-curl"),
         OsString::from("/healthz"),
     ];
     sandbox::run(
-        args.settings,
         args.workspace,
         args.projects_root,
         true,
