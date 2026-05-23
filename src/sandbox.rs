@@ -3,8 +3,9 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -38,8 +39,8 @@ pub fn run(
         env::set_current_dir(&projects_root)?;
     }
 
-    let daemon_sock = sandbox_home.join(format!("daemon-{}.sock", std::process::id()));
-    let _daemon_guard = ensure_daemon(&daemon_sock, &projects_root)?;
+    let daemon_sock = sandbox_home.join("daemon.sock");
+    ensure_daemon_running(&daemon_sock, &projects_root)?;
 
     let dynamic_settings =
         policy::prepare_settings(&projects_root, &daemon_sock, &cfg.network.allowed_domains)?;
@@ -69,25 +70,47 @@ pub fn run(
     )));
     daemonized.extend(command);
 
-    let status = Command::new("srt")
-        .arg("--settings")
-        .arg(&dynamic_settings)
-        .arg("--")
-        .args(&daemonized)
-        .stdin(Stdio::null())
-        .env("HOME", sandbox_home.join("home"))
-        .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
-        .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
-        .env("XDG_DATA_HOME", sandbox_home.join("share"))
-        .env("TMPDIR", sandbox_home.join("tmp"))
-        .env("npm_config_cache", sandbox_home.join("npm-cache"))
-        .env("npm_config_prefix", sandbox_home.join("npm-prefix"))
-        .env("npm_config_audit", "false")
-        .env("npm_config_fund", "false")
-        .env("npm_config_update_notifier", "false")
-        .status()?;
+    let args: Vec<OsString> = vec![
+        OsString::from("srt"),
+        OsString::from("--settings"),
+        dynamic_settings.clone().into(),
+        OsString::from("--"),
+    ]
+    .into_iter()
+    .chain(daemonized)
+    .collect();
 
-    Ok(exit_code(status.code()))
+    match unsafe { nix::unistd::fork() } {
+        Ok(nix::unistd::ForkResult::Parent { child }) => {
+            let status = nix::sys::wait::waitpid(child, None)?;
+            Ok(match status {
+                nix::sys::wait::WaitStatus::Exited(_, code) => code.try_into().unwrap_or(1),
+                nix::sys::wait::WaitStatus::Signaled(_, sig, _) => 128 + sig as u8,
+                _ => 1,
+            })
+        }
+        Ok(nix::unistd::ForkResult::Child) => {
+            let mut cmd = Command::new(&args[0]);
+            for arg in &args[1..] {
+                cmd.arg(arg);
+            }
+            cmd.env("HOME", sandbox_home.join("home"))
+                .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
+                .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
+                .env("XDG_DATA_HOME", sandbox_home.join("share"))
+                .env("TMPDIR", sandbox_home.join("tmp"))
+                .env("npm_config_cache", sandbox_home.join("npm-cache"))
+                .env("npm_config_prefix", sandbox_home.join("npm-prefix"))
+                .env("npm_config_audit", "false")
+                .env("npm_config_fund", "false")
+                .env("npm_config_update_notifier", "false");
+            let _err = cmd.exec();
+            // exec failed
+            eprintln!("agent-sandbox: failed to exec srt: {_err}");
+            std::process::exit(127);
+        }
+        Err(_) => Err("fork failed".into()),
+    }
 }
 
 fn sibling_binary(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -107,12 +130,15 @@ fn sibling_binary(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     }
 }
 
-fn ensure_daemon(
+fn ensure_daemon_running(
     socket_path: &Path,
     projects_root: &Path,
-) -> Result<DaemonGuard, Box<dyn std::error::Error>> {
-    // Clean up any stale socket with this exact path (from a prior crash)
-    let _ = fs::remove_file(socket_path);
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Already running?
+    if let Ok(mut conn) = UnixStream::connect(socket_path) {
+        let _ = writeln!(conn, "healthz");
+        return Ok(());
+    }
 
     // Ensure parent directory exists
     if let Some(parent) = socket_path.parent() {
@@ -125,21 +151,14 @@ fn ensure_daemon(
         .arg(socket_path)
         .arg("--projects-root")
         .arg(projects_root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .spawn()?;
 
     // Wait for socket to appear (poll 5s), verify liveness via health check
     for _ in 0..50 {
         if let Ok(mut conn) = UnixStream::connect(socket_path) {
             let _ = writeln!(conn, "healthz");
-            return Ok(DaemonGuard {
-                child,
-                socket_path: socket_path.to_owned(),
-            });
+            return Ok(());
         }
-        // Check if daemon exited before socket was created
         if let Some(status) = child.try_wait()? {
             return Err(format!("daemon exited prematurely with {status}").into());
         }
@@ -147,19 +166,6 @@ fn ensure_daemon(
     }
 
     Err("daemon socket did not appear within 5s".into())
-}
-
-struct DaemonGuard {
-    child: Child,
-    socket_path: PathBuf,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = fs::remove_file(&self.socket_path);
-    }
 }
 
 pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
@@ -267,32 +273,10 @@ fn command_name(command: &OsStr) -> String {
         .to_string()
 }
 
-fn exit_code(code: Option<i32>) -> u8 {
-    code.unwrap_or(1).try_into().unwrap_or(1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::ffi::OsString;
-
-    #[test]
-    fn test_exit_code_normal() {
-        assert_eq!(exit_code(Some(0)), 0);
-        assert_eq!(exit_code(Some(1)), 1);
-        assert_eq!(exit_code(Some(42)), 42);
-    }
-
-    #[test]
-    fn test_exit_code_none_defaults_to_1() {
-        assert_eq!(exit_code(None), 1);
-    }
-
-    #[test]
-    fn test_exit_code_clamped_to_u8() {
-        assert_eq!(exit_code(Some(256)), 1);
-        assert_eq!(exit_code(Some(-1)), 1);
-    }
 
     #[test]
     fn test_command_name_simple() {

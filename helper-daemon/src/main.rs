@@ -37,11 +37,24 @@ fn real_main() -> std::io::Result<()> {
     let socket_path = resolve_path(&cli.socket_path);
     let projects_root = cli.projects_root.as_deref().map(resolve_path);
 
-    let _ = fs::remove_file(&socket_path);
+    // Check if another daemon is already running
+    if let Ok(mut conn) = UnixStream::connect(&socket_path) {
+        let _ = writeln!(conn, "healthz");
+        let mut buf = [0u8; 256];
+        if let Ok(n) = conn.read(&mut buf) {
+            let resp = String::from_utf8_lossy(&buf[..n]);
+            if resp.contains("\"ok\":true") {
+                eprintln!("daemon already running on {}", socket_path.display());
+                std::process::exit(0);
+            }
+        }
+    }
 
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)?;
     }
+
+    let _ = fs::remove_file(&socket_path);
 
     let listener = UnixListener::bind(&socket_path)?;
     eprintln!(
@@ -52,8 +65,10 @@ fn real_main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(err) = handle_connection(stream, projects_root.as_deref()) {
-                    eprintln!("request failed: {err}");
+                if let Err(ref err) = handle_connection(stream, projects_root.as_deref()) {
+                    if err.kind() != std::io::ErrorKind::BrokenPipe {
+                        eprintln!("request failed: {err}");
+                    }
                 }
             }
             Err(err) => eprintln!("accept failed: {err}"),
