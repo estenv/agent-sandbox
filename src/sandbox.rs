@@ -91,6 +91,23 @@ pub fn run(
     Ok(exit_code(status.code()))
 }
 
+fn daemon_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join("agent-sandbox-helper-daemon");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            return Err(format!(
+                "daemon binary not found next to this binary: expected {}",
+                candidate.display()
+            )
+            .into());
+        }
+    }
+    Err("cannot determine path of current executable".into())
+}
+
 fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::Error>> {
     // Clean up any stale socket with this exact path (from a prior crash)
     let _ = fs::remove_file(socket_path);
@@ -100,8 +117,8 @@ fn ensure_daemon(socket_path: &Path) -> Result<DaemonGuard, Box<dyn std::error::
         fs::create_dir_all(parent)?;
     }
 
-    // Spawn daemon
-    let mut child = Command::new("agent-sandbox-helper-daemon")
+    // Spawn daemon (must live next to the agent-sandbox binary)
+    let mut child = Command::new(daemon_binary()?)
         .arg("--socket-path")
         .arg(socket_path)
         .stderr(Stdio::piped())
