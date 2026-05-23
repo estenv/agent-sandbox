@@ -113,9 +113,21 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
 pub fn prepare_settings(
     projects_root: &Path,
     daemon_sock: &Path,
+    allowed_domains: &[String],
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let home = host_home();
     let mut settings: serde_json::Value = serde_json::from_str(DEFAULT_SETTINGS_JSON)?;
+
+    // Override allowed domains with user config
+    if let Some(allowed) = settings
+        .pointer_mut("/network/allowedDomains")
+        .and_then(|v| v.as_array_mut())
+    {
+        *allowed = allowed_domains
+            .iter()
+            .map(|d| serde_json::Value::String(d.clone()))
+            .collect();
+    }
 
     // Add the daemon socket's parent dir to allowWrite so bwrap bind-mounts it rw
     if let Some(allow_write) = settings

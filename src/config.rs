@@ -4,13 +4,36 @@ use std::path::PathBuf;
 
 pub const DEFAULT_CONFIG_JSON: &str = r#"{
   "projects_root": "~/repos",
-  "sandbox_home": "~/.agent-sandbox"
+  "sandbox_home": "~/.agent-sandbox",
+  "network": {
+    "allowed_domains": ["api.anthropic.com"]
+  }
 }"#;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WrapperConfig {
     pub projects_root: String,
     pub sandbox_home: String,
+    #[serde(default)]
+    pub network: NetworkConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct NetworkConfig {
+    #[serde(default = "default_allowed_domains")]
+    pub allowed_domains: Vec<String>,
+}
+
+fn default_allowed_domains() -> Vec<String> {
+    vec!["api.anthropic.com".to_string()]
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        NetworkConfig {
+            allowed_domains: default_allowed_domains(),
+        }
+    }
 }
 
 pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
@@ -36,15 +59,17 @@ pub fn load_config() -> Result<WrapperConfig, Box<dyn std::error::Error>> {
     let config_dir = config_dir()?;
     let config_path = config_dir.join("config.json");
 
-    let mut config = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)?;
-        serde_json::from_str(&content)?
-    } else {
-        WrapperConfig {
-            projects_root: "~/repos".to_string(),
-            sandbox_home: "~/.agent-sandbox".to_string(),
-        }
-    };
+    if !config_path.exists() {
+        std::fs::create_dir_all(&config_dir)?;
+        std::fs::write(&config_path, DEFAULT_CONFIG_JSON)?;
+        eprintln!(
+            "agent-sandbox: created default config at {}",
+            config_path.display()
+        );
+    }
+
+    let content = std::fs::read_to_string(&config_path)?;
+    let mut config: WrapperConfig = serde_json::from_str(&content)?;
 
     if let Some(val) = env::var_os("AGENT_SANDBOX_PROJECTS_ROOT") {
         config.projects_root = val.to_string_lossy().to_string();

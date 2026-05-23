@@ -41,7 +41,8 @@ pub fn run(
     let daemon_sock = sandbox_home.join(format!("daemon-{}.sock", std::process::id()));
     let _daemon_guard = ensure_daemon(&daemon_sock, &projects_root)?;
 
-    let dynamic_settings = policy::prepare_settings(&projects_root, &daemon_sock)?;
+    let dynamic_settings =
+        policy::prepare_settings(&projects_root, &daemon_sock, &cfg.network.allowed_domains)?;
 
     ensure_workspace_dirs(&sandbox_home)?;
     configure_agent_runtime(&sandbox_home, &command[0])?;

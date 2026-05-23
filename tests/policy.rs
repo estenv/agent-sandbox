@@ -1,9 +1,18 @@
 use std::path::PathBuf;
 
-fn run_prepare_settings(projects_root: &str, daemon_sock: &str) -> (String, serde_json::Value) {
+fn default_allowed_domains() -> Vec<String> {
+    vec!["api.anthropic.com".to_string()]
+}
+
+fn run_prepare_settings(
+    projects_root: &str,
+    daemon_sock: &str,
+    allowed_domains: &[String],
+) -> (String, serde_json::Value) {
     let path = agent_sandbox::policy::prepare_settings(
         &PathBuf::from(projects_root),
         &PathBuf::from(daemon_sock),
+        allowed_domains,
     )
     .unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
@@ -13,7 +22,11 @@ fn run_prepare_settings(projects_root: &str, daemon_sock: &str) -> (String, serd
 
 #[test]
 fn test_prepare_settings_writes_valid_json() {
-    let (_, parsed) = run_prepare_settings("/tmp/proj", "/tmp/daemon/test.sock");
+    let (_, parsed) = run_prepare_settings(
+        "/tmp/proj",
+        "/tmp/daemon/test.sock",
+        &default_allowed_domains(),
+    );
     assert!(parsed.pointer("/network").is_some());
     assert!(parsed.pointer("/filesystem").is_some());
     assert!(parsed.pointer("/ignoreViolations").is_some());
@@ -21,7 +34,11 @@ fn test_prepare_settings_writes_valid_json() {
 
 #[test]
 fn test_prepare_settings_replaces_dot_with_projects_root() {
-    let (_, parsed) = run_prepare_settings("/tmp/test-projects", "/tmp/daemon/test.sock");
+    let (_, parsed) = run_prepare_settings(
+        "/tmp/test-projects",
+        "/tmp/daemon/test.sock",
+        &default_allowed_domains(),
+    );
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
         .unwrap()
@@ -33,7 +50,11 @@ fn test_prepare_settings_replaces_dot_with_projects_root() {
 
 #[test]
 fn test_prepare_settings_adds_daemon_socket_dir_to_allow_write() {
-    let (_, parsed) = run_prepare_settings("/tmp/proj", "/tmp/daemon-dir/test.sock");
+    let (_, parsed) = run_prepare_settings(
+        "/tmp/proj",
+        "/tmp/daemon-dir/test.sock",
+        &default_allowed_domains(),
+    );
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
         .unwrap()
@@ -47,6 +68,7 @@ fn test_prepare_settings_no_duplicate_daemon_socket_dir() {
     let path = agent_sandbox::policy::prepare_settings(
         &PathBuf::from("/tmp/proj"),
         &PathBuf::from("/tmp/daemon/test.sock"),
+        &default_allowed_domains(),
     )
     .unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
@@ -64,7 +86,7 @@ fn test_prepare_settings_no_duplicate_daemon_socket_dir() {
 
 #[test]
 fn test_prepare_settings_expands_tilde_paths() {
-    let (_, parsed) = run_prepare_settings("/tmp/proj", "/tmp/d.sock");
+    let (_, parsed) = run_prepare_settings("/tmp/proj", "/tmp/d.sock", &default_allowed_domains());
 
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
@@ -91,7 +113,7 @@ fn test_prepare_settings_expands_tilde_paths() {
 
 #[test]
 fn test_prepare_settings_network_defaults() {
-    let (_, parsed) = run_prepare_settings("/tmp/p", "/tmp/d.sock");
+    let (_, parsed) = run_prepare_settings("/tmp/p", "/tmp/d.sock", &default_allowed_domains());
     assert!(parsed.pointer("/network/deniedDomains").is_some());
     assert_eq!(
         parsed
@@ -111,7 +133,7 @@ fn test_prepare_settings_network_defaults() {
 
 #[test]
 fn test_prepare_settings_allowed_domains_no_localhost() {
-    let (_, parsed) = run_prepare_settings("/tmp/p", "/tmp/d.sock");
+    let (_, parsed) = run_prepare_settings("/tmp/p", "/tmp/d.sock", &default_allowed_domains());
     let allowed = parsed
         .pointer("/network/allowedDomains")
         .unwrap()
@@ -119,4 +141,18 @@ fn test_prepare_settings_allowed_domains_no_localhost() {
         .unwrap();
     assert!(!allowed.contains(&serde_json::Value::String("localhost".to_string())));
     assert!(!allowed.contains(&serde_json::Value::String("127.0.0.1".to_string())));
+}
+
+#[test]
+fn test_prepare_settings_custom_allowed_domains() {
+    let custom = vec!["api.anthropic.com".to_string(), "github.com".to_string()];
+    let (_, parsed) = run_prepare_settings("/tmp/p", "/tmp/d.sock", &custom);
+    let allowed = parsed
+        .pointer("/network/allowedDomains")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(allowed.len(), 2);
+    assert!(allowed.contains(&serde_json::Value::String("api.anthropic.com".to_string())));
+    assert!(allowed.contains(&serde_json::Value::String("github.com".to_string())));
 }
