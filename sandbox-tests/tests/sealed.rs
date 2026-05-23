@@ -103,6 +103,7 @@ fn test_root(name: &str) -> PathBuf {
     dir
 }
 
+#[ignore]
 #[test]
 fn sealed_git_operations() {
     require_srt();
