@@ -3,7 +3,6 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -80,37 +79,32 @@ pub fn run(
     .chain(daemonized)
     .collect();
 
-    match unsafe { nix::unistd::fork() } {
-        Ok(nix::unistd::ForkResult::Parent { child }) => {
-            let status = nix::sys::wait::waitpid(child, None)?;
-            Ok(match status {
-                nix::sys::wait::WaitStatus::Exited(_, code) => code.try_into().unwrap_or(1),
-                nix::sys::wait::WaitStatus::Signaled(_, sig, _) => 128 + sig as u8,
-                _ => 1,
-            })
-        }
-        Ok(nix::unistd::ForkResult::Child) => {
-            let mut cmd = Command::new(&args[0]);
-            for arg in &args[1..] {
-                cmd.arg(arg);
-            }
-            cmd.env("HOME", sandbox_home.join("home"))
-                .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
-                .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
-                .env("XDG_DATA_HOME", sandbox_home.join("share"))
-                .env("TMPDIR", sandbox_home.join("tmp"))
-                .env("npm_config_cache", sandbox_home.join("npm-cache"))
-                .env("npm_config_prefix", sandbox_home.join("npm-prefix"))
-                .env("npm_config_audit", "false")
-                .env("npm_config_fund", "false")
-                .env("npm_config_update_notifier", "false");
-            let _err = cmd.exec();
-            // exec failed
-            eprintln!("agent-sandbox: failed to exec srt: {_err}");
-            std::process::exit(127);
-        }
-        Err(_) => Err("fork failed".into()),
+    let mut cmd = Command::new(&args[0]);
+    for arg in &args[1..] {
+        cmd.arg(arg);
     }
+    cmd.env("HOME", sandbox_home.join("home"))
+        .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
+        .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
+        .env("XDG_DATA_HOME", sandbox_home.join("share"))
+        .env("TMPDIR", sandbox_home.join("tmp"))
+        .env("npm_config_cache", sandbox_home.join("npm-cache"))
+        .env("npm_config_prefix", sandbox_home.join("npm-prefix"))
+        .env("npm_config_audit", "false")
+        .env("npm_config_fund", "false")
+        .env("npm_config_update_notifier", "false");
+
+    let mut child = cmd.spawn().unwrap_or_else(|e| {
+        eprintln!("agent-sandbox: failed to spawn srt: {e}");
+        std::process::exit(127);
+    });
+
+    let status = child.wait().unwrap_or_else(|e| {
+        eprintln!("agent-sandbox: failed to wait for srt: {e}");
+        std::process::exit(1);
+    });
+
+    Ok(status.code().unwrap_or(1) as u8)
 }
 
 fn sibling_binary(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
