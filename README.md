@@ -1,6 +1,8 @@
 # agent-sandbox
 
-Convenience wrapper around [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime) (`srt`) for running coding agents with workspace access, credential protection, and no general outbound internet access.
+Convenience wrapper around [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime) (`srt`) for running coding agents under a shared projects root with credential protection and no general outbound internet access.
+
+Agents run inside an `srt` sandbox that grants read/write access to all projects under a configured projects root (`~/repos` by default). A shared, persistent fake home (`~/.agent-sandbox`) allows agent config, auth, and skills to survive across sessions.
 
 ## Prerequisites
 
@@ -12,8 +14,9 @@ Convenience wrapper around [Anthropic Sandbox Runtime](https://github.com/anthro
 
 ```bash
 cargo install --path .
-agent-sandbox init
-agent-sandbox run -- opencode
+agent-sandbox init     # creates config, settings, and workspace dirs
+cd ~/repos/my-project
+agent-sandbox opencode # launches opencode in the sandbox
 ```
 
 Review `~/.config/agent-sandbox/settings.json` before trusting the sandbox policy.
@@ -22,9 +25,8 @@ Review `~/.config/agent-sandbox/settings.json` before trusting the sandbox polic
 
 ```
 agent-sandbox init
-agent-sandbox clone <repo-url> [directory]
 agent-sandbox prepare <agent>
-agent-sandbox run [--settings <path>] [--workspace <path>] -- <command> [args...]
+agent-sandbox run [--projects-root <path>] [--workspace <path>] -- <command> [args...]
 agent-sandbox pi [args...]
 agent-sandbox opencode [args...]
 agent-sandbox claude [args...]
@@ -36,8 +38,7 @@ agent-sandbox doctor
 
 | Command | Description |
 |---|---|
-| `init` | Create default SRT settings and sandbox runtime directories |
-| `clone` | Clone a Git repository on the host (outside the sandbox) |
+| `init` | Create default wrapper config, SRT settings, and runtime directories |
 | `prepare` | Install/update a known agent on the host via npm |
 | `run` | Run any command inside the sandbox |
 | `pi` | Shortcut for `run -- pi` |
@@ -46,17 +47,45 @@ agent-sandbox doctor
 | `copilot` | Shortcut for `run -- copilot` |
 | `doctor` | Sandboxed connectivity check against the helper daemon |
 
-### Environment
+### CWD rules
 
-| Variable | Default | Purpose |
+- If the current working directory is inside the projects root, the sandbox inherits it.
+- If the current working directory is **outside** the projects root, the sandbox CWD is set to the projects root itself.
+
+This ensures agents only ever operate within the designated projects scope.
+
+### Configuration
+
+Wrapper config at `~/.config/agent-sandbox/config.toml`:
+
+```toml
+projects_root = "~/repos"
+sandbox_home = "~/.agent-sandbox"
+```
+
+| Variable | Overrides | Default |
 |---|---|---|
-| `AGENT_SANDBOX_SETTINGS` | `~/.config/agent-sandbox/settings.json` | Path to SRT settings file |
-| `AGENT_SANDBOX_HOME` | `~/.agent-sandbox` | Sandbox-visible runtime state root |
-| `AGENT_SANDBOX_NPM` | `npm` | npm command for host-side agent preparation |
+| `AGENT_SANDBOX_PROJECTS_ROOT` | `projects_root` | `~/repos` |
+| `AGENT_SANDBOX_HOME` | `sandbox_home` | `~/.agent-sandbox` |
+| `AGENT_SANDBOX_SETTINGS` | SRT settings path | `~/.config/agent-sandbox/settings.json` |
+| `AGENT_SANDBOX_NPM` | npm binary for agent prep | `npm` |
 
-The sandbox-visible runtime state (`~/.agent-sandbox` by default) contains synthetic HOME,
-XDG config/cache/data, temp, and npm directories. LLM provider auth lives here.
-Real host credentials (SSH, GitHub, cloud, etc.) remain denied by the SRT policy.
+### Sandbox-visible runtime state
+
+The sandbox home (`~/.agent-sandbox` by default) contains synthetic HOME, XDG config/cache/data, temp, and npm directories. LLM provider auth lives here and persists across sessions. Real host credentials (SSH, GitHub, cloud, etc.) remain denied by the SRT policy.
+
+```
+~/.agent-sandbox/
+├── home/
+├── config/
+├── cache/
+├── share/
+├── tmp/
+├── npm-cache/
+├── npm-prefix/
+├── bin/
+└── logs/
+```
 
 ## Project layout
 

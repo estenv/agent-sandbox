@@ -2,43 +2,80 @@
 
 ## Purpose
 
-Agent Sandbox is a convenience wrapper around Anthropic Sandbox Runtime (`srt`) for running coding agents with a practical daily workflow. It does not replace `srt`; it makes `srt` easier to use consistently.
+Agent Sandbox is a convenience wrapper around Anthropic Sandbox Runtime (`srt`) for running coding agents under a shared projects root with a persistent sandbox home, credential protection, and no general outbound internet access. It does not replace `srt`; it makes `srt` easier to use consistently.
 
-The target workflow is:
+The target workflow:
 
 ```bash
-agent-sandbox init
-agent-sandbox clone git@github.com:org/repo.git
-cd repo
-agent-sandbox pi
-agent-sandbox opencode
-agent-sandbox copilot
-agent-sandbox run -- bash
+cd ~/repos/my-project
+agent-sandbox opencode  # opens opencode in the sandbox, CWD is my-project
+agent-sandbox copilot   # opens copilot with the same shared home, auth persists
 ```
 
 The wrapper handles:
 
 - default config discovery,
-- default sandbox-visible runtime state,
+- a shared sandbox-visible runtime state that persists across sessions,
 - known-agent preparation,
 - command shortcuts,
+- CWD enforcement within the projects root,
+- dynamic SRT settings generation,
 - and a future integration point for a host-side helper daemon.
 
 The security boundary remains:
 
 ```bash
-srt --settings ~/.config/agent-sandbox/settings.json -- <command>
+srt --settings <dynamically-generated.json> -- <command>
 ```
 
-## Defaults
+## CLI shape
 
-- SRT settings: `~/.config/agent-sandbox/settings.json`.
-- Sandbox-visible runtime state: `~/.agent-sandbox`.
-- Helper daemon test endpoint: `http://localhost:47688/healthz`.
+```bash
+agent-sandbox init
+agent-sandbox prepare <agent>
+agent-sandbox run [--projects-root <path>] [--workspace <path>] [--no-prepare] -- <command> [args...]
+agent-sandbox pi [args...]
+agent-sandbox opencode [args...]
+agent-sandbox claude [args...]
+agent-sandbox copilot [args...]
+agent-sandbox doctor
+```
 
-The runtime state directory contains:
+`doctor` currently runs a sandboxed `curl` to the helper daemon health endpoint.
 
-```text
+## Configuration
+
+Wrapper config at `~/.config/agent-sandbox/config.toml`:
+
+```toml
+projects_root = "~/repos"
+sandbox_home = "~/.agent-sandbox"
+```
+
+| Variable | Overrides | Default |
+|---|---|---|
+| `AGENT_SANDBOX_PROJECTS_ROOT` | `projects_root` | `~/repos` |
+| `AGENT_SANDBOX_HOME` | `sandbox_home` | `~/.agent-sandbox` |
+| `AGENT_SANDBOX_SETTINGS` | SRT settings path | `~/.config/agent-sandbox/settings.json` |
+| `AGENT_SANDBOX_NPM` | npm binary for agent prep | `npm` |
+
+CLI flags `--projects-root` and `--workspace` override all of the above for a single invocation.
+
+## CWD rules
+
+- If the current working directory is inside the projects root, the sandbox inherits that CWD.
+- If the current working directory is **outside** the projects root, the sandbox CWD is set to the projects root itself, and a warning is printed.
+- Agents never execute or write outside the projects root.
+
+## Dynamic settings generation
+
+The `settings.json` template is static and user-reviewed, with one key exception: the `"."` entry in `filesystem.allowWrite` is replaced at runtime with the absolute resolved path of the projects root. The modified JSON is written to a temp file and passed to `srt`. This ensures all projects under the root are writable without modifying the user's reviewed policy file.
+
+## Shared runtime state
+
+The sandbox home (`~/.agent-sandbox` by default) is a persistent directory containing synthetic HOME, XDG config/cache/data, temp, and npm directories. It is created once by `init` and reused across all agent sessions:
+
+```
 ~/.agent-sandbox/
 ├── home/
 ├── config/
@@ -51,7 +88,7 @@ The runtime state directory contains:
 └── logs/
 ```
 
-The sandboxed command runs with:
+The sandboxed process runs with:
 
 - `HOME=~/.agent-sandbox/home`
 - `XDG_CONFIG_HOME=~/.agent-sandbox/config`
@@ -60,33 +97,17 @@ The sandboxed command runs with:
 - `TMPDIR=~/.agent-sandbox/tmp`
 - npm cache/prefix under `~/.agent-sandbox`
 
-LLM provider auth is allowed to live in the sandbox-visible agent home. Real host credentials such as SSH keys, GitHub CLI auth, cloud credentials, package-manager tokens, and real home config remain denied by the default SRT policy.
-
-## CLI shape
-
-```bash
-agent-sandbox init
-agent-sandbox clone <repo-url> [directory]
-agent-sandbox prepare <agent>
-agent-sandbox run -- <command> [args...]
-agent-sandbox pi [args...]
-agent-sandbox opencode [args...]
-agent-sandbox claude [args...]
-agent-sandbox copilot [args...]
-agent-sandbox doctor
-```
-
-`doctor` currently runs a sandboxed `curl` to the helper daemon health endpoint.
+LLM provider auth (e.g., `~/.local/share/opencode/auth.json` inside the sandbox view of the fake home) lives here and persists. Agent config, custom skills, theme settings — anything written to the fake home — survives across sessions.
 
 ## Settings ownership
 
-`agent-sandbox init` can create a starter policy, but it cannot know the right policy for every machine or workflow. The user must review and edit:
+`agent-sandbox init` creates a starter policy, but it cannot know the right policy for every machine or workflow. The user must review and edit:
 
 ```text
 ~/.config/agent-sandbox/settings.json
 ```
 
-before trusting it.
+before trusting it. The only runtime modification to the settings is the `allowWrite` substitution described above.
 
 ## Policy model
 
@@ -102,11 +123,15 @@ Instead, the policy explicitly denies common sensitive files and directories:
 - GitHub, Azure, Docker, Kubernetes, AWS, and GCP credentials.
 - Package-manager credentials for npm, PyPI, Cargo, NuGet, Maven, and Gradle.
 - OpenCode's documented auth file at `~/.local/share/opencode/auth.json`.
-- Common project-local secret files such as `.env`, `.env.local`, `.envrc`, `.npmrc`, `.pypirc`, and NuGet config files.
+- Common project-local secret files such as `.env`, `.envrc`, `.npmrc`, `.pypirc`, and NuGet config files.
 
-Write access uses SRT's allow-only model. The policy allows writes to `.` and `/tmp`, then explicitly denies writes to common secret/config files inside the workspace.
+Write access uses SRT's allow-only model. The policy writes to the full projects root (resolved to an absolute path at runtime) plus the shared sandbox home, `/tmp`, and `/dev/shm`. It then explicitly denies writes to sensitive paths:
 
-The default policy further blocks `allowGitConfig: false` to prevent git config mutation.
+- `.git/config` and `.git/hooks` — prevents remote rewriting, hook injection
+- `.github/workflows` — prevents workflow injection
+- `.env`, `.npmrc`, `.pypirc`, `NuGet.config` — prevents token exfiltration
+
+The default policy further blocks `allowGitConfig: false` to prevent `git config` mutation.
 
 ### Network
 
@@ -114,7 +139,7 @@ SRT network access is allow-only by default. The default policy allowlists only 
 
 The explicit deny list repeats high-risk destinations even though they are already blocked by omission. This makes the policy easier to audit and protects against accidental future broad allow rules because `deniedDomains` takes precedence over `allowedDomains`.
 
-The policy does not allow package registries or source-control remotes. Dependency installation, `git fetch`, `git push`, PR creation, and Azure DevOps operations belong in the future helper-daemon track, not inside the sandbox itself.
+The policy does not allow package registries or source-control remotes. Remote git operations (`git fetch`, `git push`, PR creation) are intentionally blocked — those belong in the future helper-daemon track.
 
 ### Unix sockets
 
@@ -134,7 +159,7 @@ Use `agent-sandbox run --no-prepare -- <command>` to skip auto-installation.
 
 ## Auth stance
 
-LLM provider auth is allowed to live under `~/.agent-sandbox`, either as environment-provided credentials or as agent-specific auth files written to the fake home.
+LLM provider auth is allowed to live under the shared sandbox home, either as environment-provided credentials or as agent-specific auth files written to the fake home. Because the home is persistent, authenticating once in an opencode session makes the token available to all subsequent sessions.
 
 This is an accepted risk because provider-token exfiltration has limited blast radius compared with host SSH keys, GitHub tokens, cloud credentials, package-manager credentials, or repository mutation credentials.
 
@@ -142,7 +167,7 @@ The default settings still deny access to real host credential paths.
 
 ## OpenCode-specific notes
 
-OpenCode stores credentials at `~/.local/share/opencode/auth.json` by default — this path is denied by the default SRT policy. Use provider API keys from environment variables instead of agent-specific login files in the real home directory.
+OpenCode stores credentials at `~/.local/share/opencode/auth.json` by default — this path is denied by the default SRT policy when it refers to the **host** home. Inside the sandbox, the fake home is `~/.agent-sandbox/home`, so OpenCode will write auth to `~/.agent-sandbox/home/.local/share/opencode/auth.json` which is **not** denied. Use provider API keys in the agent's auth storage rather than environment variables for persistence.
 
 Set these environment variables before launch to avoid startup dependencies on blocked network domains:
 

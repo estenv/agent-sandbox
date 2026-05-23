@@ -1,10 +1,16 @@
 use clap::{Args, Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+const DEFAULT_CONFIG_TOML: &str = r#"
+projects_root = "~/repos"
+sandbox_home = "~/.agent-sandbox"
+"#;
 
 const DEFAULT_SETTINGS_JSON: &str = r#"{
   "network": {
@@ -46,7 +52,9 @@ const DEFAULT_SETTINGS_JSON: &str = r#"{
       "~/.aws",
       "~/.azure",
       "~/.config/gh",
+      "~/.config/github-copilot",
       "~/.config/gcloud",
+      "~/.config/azure",
       "~/.docker",
       "~/.kube",
       "~/.npmrc",
@@ -57,6 +65,7 @@ const DEFAULT_SETTINGS_JSON: &str = r#"{
       "~/.nuget",
       "~/.m2/settings.xml",
       "~/.gradle/gradle.properties",
+      "~/.local/share/opencode/auth.json",
       ".env",
       ".env.local",
       ".envrc",
@@ -93,6 +102,12 @@ const DEFAULT_SETTINGS_JSON: &str = r#"{
 }
 "#;
 
+#[derive(Debug, Deserialize, Serialize)]
+struct WrapperConfig {
+    projects_root: String,
+    sandbox_home: String,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "agent-sandbox")]
 #[command(about = "Convenience wrapper around srt for sandboxed coding agents")]
@@ -106,37 +121,21 @@ struct Cli {
 enum CommandKind {
     /// Create default config and runtime directories.
     Init,
-
-    /// Clone a Git repository on the host.
-    Clone {
-        /// Repository URL passed to `git clone`.
-        repo_url: OsString,
-
-        /// Optional destination directory passed to `git clone`.
-        directory: Option<OsString>,
-    },
-
     /// Prepare a known agent on the host, outside the sandbox.
     Prepare {
         /// Known agent name: pi, opencode, or claude.
         agent: String,
     },
-
     /// Run any command inside the sandbox.
     Run(RunArgs),
-
     /// Shortcut for `agent-sandbox run -- pi ...`.
     Pi(ShortcutArgs),
-
     /// Shortcut for `agent-sandbox run -- opencode ...`.
     Opencode(ShortcutArgs),
-
     /// Shortcut for `agent-sandbox run -- claude ...`.
     Claude(ShortcutArgs),
-
     /// Shortcut for `agent-sandbox run -- copilot ...`.
     Copilot(ShortcutArgs),
-
     /// Run a quick connectivity check against the helper daemon from inside srt.
     Doctor(DocArgs),
 }
@@ -146,15 +145,15 @@ struct RunArgs {
     /// SRT settings file. Defaults to ~/.config/agent-sandbox/settings.json.
     #[arg(long)]
     settings: Option<PathBuf>,
-
     /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
-
+    /// Projects root directory. Defaults to the value in config.toml.
+    #[arg(long)]
+    projects_root: Option<PathBuf>,
     /// Do not auto-install known missing agent commands.
     #[arg(long)]
     no_prepare: bool,
-
     /// Command and arguments to run after `--`.
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<OsString>,
@@ -165,15 +164,15 @@ struct ShortcutArgs {
     /// SRT settings file. Defaults to ~/.config/agent-sandbox/settings.json.
     #[arg(long)]
     settings: Option<PathBuf>,
-
     /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
-
+    /// Projects root directory. Defaults to the value in config.toml.
+    #[arg(long)]
+    projects_root: Option<PathBuf>,
     /// Do not auto-install the agent if the command is missing.
     #[arg(long)]
     no_prepare: bool,
-
     /// Arguments passed to the agent.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<OsString>,
@@ -184,11 +183,12 @@ struct DocArgs {
     /// SRT settings file. Defaults to ~/.config/agent-sandbox/settings.json.
     #[arg(long)]
     settings: Option<PathBuf>,
-
     /// Sandbox-visible runtime state root. Defaults to ~/.agent-sandbox.
     #[arg(long)]
     workspace: Option<PathBuf>,
-
+    /// Projects root directory. Defaults to the value in config.toml.
+    #[arg(long)]
+    projects_root: Option<PathBuf>,
     /// Helper daemon URL to test.
     #[arg(long, default_value = "http://localhost:47688/healthz")]
     daemon_url: String,
@@ -208,10 +208,6 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         CommandKind::Init => init(),
-        CommandKind::Clone {
-            repo_url,
-            directory,
-        } => clone_repo(repo_url, directory),
         CommandKind::Prepare { agent } => {
             prepare_agent(&agent)?;
             Ok(0)
@@ -225,13 +221,86 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
     }
 }
 
+fn load_config() -> Result<WrapperConfig, Box<dyn std::error::Error>> {
+    let config_dir = config_dir()?;
+    let config_path = config_dir.join("config.toml");
+
+    let mut config = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)?;
+        toml::from_str(&content)?
+    } else {
+        WrapperConfig {
+            projects_root: "~/repos".to_string(),
+            sandbox_home: "~/.agent-sandbox".to_string(),
+        }
+    };
+
+    if let Some(val) = env::var_os("AGENT_SANDBOX_PROJECTS_ROOT") {
+        config.projects_root = val.to_string_lossy().to_string();
+    }
+    if let Some(val) = env::var_os("AGENT_SANDBOX_HOME") {
+        config.sandbox_home = val.to_string_lossy().to_string();
+    }
+
+    Ok(config)
+}
+
+fn resolve_path(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let expanded = if let Some(rest) = path.strip_prefix('~') {
+        let home = home_dir()?;
+        if rest.is_empty() || rest == "/" {
+            home
+        } else {
+            let rest = rest.trim_start_matches('/');
+            home.join(rest)
+        }
+    } else {
+        PathBuf::from(path)
+    };
+    if expanded.is_relative() {
+        Ok(env::current_dir()?.join(expanded))
+    } else {
+        Ok(expanded)
+    }
+}
+
+fn prepare_settings(base_path: &Path, projects_root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(base_path)?;
+    let mut settings: serde_json::Value = serde_json::from_str(&content)?;
+
+    if let Some(allow_write) = settings
+        .pointer_mut("/filesystem/allowWrite")
+        .and_then(|v| v.as_array_mut())
+    {
+        for item in allow_write.iter_mut() {
+            if item.as_str() == Some(".") {
+                *item = serde_json::Value::String(projects_root.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    let tmp_dir = env::temp_dir().join(format!("agent-sandbox-{}", std::process::id()));
+    fs::create_dir_all(&tmp_dir)?;
+    let tmp_path = tmp_dir.join("settings.json");
+    fs::write(&tmp_path, serde_json::to_string_pretty(&settings)?)?;
+    Ok(tmp_path)
+}
+
 fn init() -> Result<u8, Box<dyn std::error::Error>> {
     let config_dir = config_dir()?;
+    let config_path = config_dir.join("config.toml");
     let settings_path = config_dir.join("settings.json");
-    let workspace = workspace_dir()?;
+    let workspace = resolve_path("~/.agent-sandbox")?;
 
     fs::create_dir_all(&config_dir)?;
     ensure_workspace_dirs(&workspace)?;
+
+    if !config_path.exists() {
+        fs::write(&config_path, DEFAULT_CONFIG_TOML)?;
+        println!("created {}", config_path.display());
+    } else {
+        println!("config already exists: {}", config_path.display());
+    }
 
     if !settings_path.exists() {
         fs::write(&settings_path, DEFAULT_SETTINGS_JSON)?;
@@ -248,25 +317,13 @@ fn init() -> Result<u8, Box<dyn std::error::Error>> {
     Ok(0)
 }
 
-fn clone_repo(
-    repo_url: OsString,
-    directory: Option<OsString>,
-) -> Result<u8, Box<dyn std::error::Error>> {
-    let mut command = Command::new("git");
-    command.arg("clone").arg(repo_url);
-    if let Some(directory) = directory {
-        command.arg(directory);
-    }
-    let status = command.status()?;
-    Ok(exit_code(status.code()))
-}
-
 fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::error::Error>> {
     let mut command = vec![OsString::from(agent)];
     command.extend(shortcut.args);
     run(RunArgs {
         settings: shortcut.settings,
         workspace: shortcut.workspace,
+        projects_root: shortcut.projects_root,
         no_prepare: shortcut.no_prepare,
         command,
     })
@@ -276,30 +333,53 @@ fn doctor(args: DocArgs) -> Result<u8, Box<dyn std::error::Error>> {
     let command = vec![
         OsString::from("curl"),
         OsString::from("-fsS"),
-        OsString::from(args.daemon_url),
+        OsString::from(&args.daemon_url),
     ];
     run(RunArgs {
         settings: args.settings,
         workspace: args.workspace,
+        projects_root: args.projects_root,
         no_prepare: true,
         command,
     })
 }
 
 fn run(args: RunArgs) -> Result<u8, Box<dyn std::error::Error>> {
-    let settings = args.settings.map(Ok).unwrap_or_else(settings_path)?;
-    let workspace = args.workspace.map(Ok).unwrap_or_else(workspace_dir)?;
+    let config = load_config()?;
+    let settings_path = args.settings.map(Ok).unwrap_or_else(settings_path)?;
+    let projects_root = args
+        .projects_root
+        .map(Ok)
+        .unwrap_or_else(|| resolve_path(&config.projects_root))?;
+    let sandbox_home = args
+        .workspace
+        .map(Ok)
+        .unwrap_or_else(|| resolve_path(&config.sandbox_home))?;
 
-    if !settings.exists() {
+    if !settings_path.exists() {
         return Err(format!(
             "settings file not found: {}. Run `agent-sandbox init` first.",
-            settings.display()
+            settings_path.display()
         )
         .into());
     }
 
-    ensure_workspace_dirs(&workspace)?;
-    configure_agent_runtime(&workspace, &args.command[0])?;
+    fs::create_dir_all(&projects_root)?;
+
+    let user_cwd = env::current_dir()?;
+    if !user_cwd.starts_with(&projects_root) {
+        eprintln!(
+            "agent-sandbox: CWD {} is outside projects root {}; changing CWD",
+            user_cwd.display(),
+            projects_root.display()
+        );
+        env::set_current_dir(&projects_root)?;
+    }
+
+    let dynamic_settings = prepare_settings(&settings_path, &projects_root)?;
+
+    ensure_workspace_dirs(&sandbox_home)?;
+    configure_agent_runtime(&sandbox_home, &args.command[0])?;
 
     let command_name = command_name(&args.command[0]);
     if !args.no_prepare && which(&command_name).is_none() {
@@ -311,16 +391,16 @@ fn run(args: RunArgs) -> Result<u8, Box<dyn std::error::Error>> {
 
     let status = Command::new("srt")
         .arg("--settings")
-        .arg(settings)
+        .arg(&dynamic_settings)
         .arg("--")
         .args(args.command)
-        .env("HOME", workspace.join("home"))
-        .env("XDG_CONFIG_HOME", workspace.join("config"))
-        .env("XDG_CACHE_HOME", workspace.join("cache"))
-        .env("XDG_DATA_HOME", workspace.join("share"))
-        .env("TMPDIR", workspace.join("tmp"))
-        .env("npm_config_cache", workspace.join("npm-cache"))
-        .env("npm_config_prefix", workspace.join("npm-prefix"))
+        .env("HOME", sandbox_home.join("home"))
+        .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
+        .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
+        .env("XDG_DATA_HOME", sandbox_home.join("share"))
+        .env("TMPDIR", sandbox_home.join("tmp"))
+        .env("npm_config_cache", sandbox_home.join("npm-cache"))
+        .env("npm_config_prefix", sandbox_home.join("npm-prefix"))
         .env("npm_config_audit", "false")
         .env("npm_config_fund", "false")
         .env("npm_config_update_notifier", "false")
@@ -443,13 +523,6 @@ fn settings_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         return Ok(PathBuf::from(path));
     }
     Ok(config_dir()?.join("settings.json"))
-}
-
-fn workspace_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Some(path) = env::var_os("AGENT_SANDBOX_HOME") {
-        return Ok(PathBuf::from(path));
-    }
-    Ok(home_dir()?.join(".agent-sandbox"))
 }
 
 fn home_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
