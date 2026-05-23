@@ -7,7 +7,6 @@ pub fn prepare(agent: &str) -> Result<(), Box<dyn std::error::Error>> {
     match agent {
         "opencode" => npm_install_global("opencode-ai")?,
         "pi" | "pi-agent" => npm_install_global("@mariozechner/pi-coding-agent")?,
-        "claude" => npm_install_global("@anthropic-ai/claude-code")?,
         other => return Err(format!("no preparation recipe for `{other}`").into()),
     }
     Ok(())
@@ -17,7 +16,6 @@ pub fn known_for_command(command: &str) -> Option<&'static str> {
     match command {
         "opencode" => Some("opencode"),
         "pi" | "pi-agent" => Some("pi"),
-        "claude" => Some("claude"),
         _ => None,
     }
 }

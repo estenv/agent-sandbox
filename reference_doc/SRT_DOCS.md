@@ -6,7 +6,7 @@ A lightweight sandboxing tool for enforcing filesystem and network restrictions 
 
 > **Beta Research Preview**
 >
-> The Sandbox Runtime is a research preview developed for [Claude Code](https://www.claude.com/product/claude-code) to enable safer AI agents. It's being made available as an early open source preview to help the broader ecosystem build more secure agentic systems. As this is an early research preview, APIs and configuration formats may evolve. We welcome feedback and contributions to make AI agents safer by default!
+> The Sandbox Runtime is a research preview to enable safer AI agents. It's being made available as an early open source preview to help the broader ecosystem build more secure agentic systems. As this is an early research preview, APIs and configuration formats may evolve. We welcome feedback and contributions to make AI agents safer by default!
 
 ## Installation
 
@@ -126,9 +126,8 @@ Both filesystem and network isolation are required for effective sandboxing. Wit
 
 Both HTTP/HTTPS (via HTTP proxy) and other TCP traffic (via SOCKS5 proxy) are mediated by these proxies, which enforce your domain allowlists and denylists.
 
-For more details on sandboxing in Claude Code, see:
+For more details on sandboxing, see:
 
-- [Claude Code Sandboxing Documentation](https://docs.claude.com/en/docs/claude-code/sandboxing)
 - [Beyond Permission Prompts: Making Claude Code More Secure and Autonomous](https://www.anthropic.com/engineering/claude-code-sandboxing)
 
 ## Architecture
@@ -540,7 +539,7 @@ Certain sensitive files and directories are **always blocked from writes**, even
 **Always-blocked directories:**
 
 - IDE directories: `.vscode/`, `.idea/`
-- Claude config directories: `.claude/commands/`, `.claude/agents/`
+- Agent config directories: `.claude/commands/`, `.claude/agents/`
 - Git hooks and config: `.git/hooks/`, `.git/config`
 
 These paths are blocked automatically - you don't need to add them to `denyWrite`. For example, even with `allowWrite: ["."]`, writing to `.bashrc` or `.git/hooks/pre-commit` will fail:
@@ -605,9 +604,9 @@ When a sandboxed process attempts to access a restricted resource:
 
 1. **Blocks the operation** at the OS level (returns `EPERM` error)
 2. **Logs the violation** (platform-specific mechanisms)
-3. **Notifies the user** (in Claude Code, this triggers a permission prompt)
+3. **Notifies the user**
 
-**macOS**: The sandbox runtime taps into macOS's system sandbox violation log store. This provides real-time notifications with detailed information about what was attempted and why it was blocked. This is the same mechanism Claude Code uses for violation detection.
+**macOS**: The sandbox runtime taps into macOS's system sandbox violation log store. This provides real-time notifications with detailed information about what was attempted and why it was blocked.
 
 ```bash
 # View sandbox violations in real-time

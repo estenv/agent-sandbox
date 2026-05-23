@@ -23,7 +23,7 @@ enum CommandKind {
     Init,
     /// Prepare a known agent on the host, outside the sandbox.
     Prepare {
-        /// Known agent name: pi, opencode, or claude (also accepts pi-agent).
+        /// Known agent name: pi, or opencode (also accepts pi-agent).
         agent: String,
     },
     /// Run any command inside the sandbox.
@@ -32,10 +32,6 @@ enum CommandKind {
     Pi(ShortcutArgs),
     /// Shortcut for `agent-sandbox run -- opencode ...`.
     Opencode(ShortcutArgs),
-    /// Shortcut for `agent-sandbox run -- claude ...`.
-    Claude(ShortcutArgs),
-    /// Shortcut for `agent-sandbox run -- copilot ...`.
-    Copilot(ShortcutArgs),
     /// Run a connectivity health check inside the sandbox against the helper daemon.
     Healthcheck(HealthcheckArgs),
 }
@@ -108,8 +104,6 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
         ),
         CommandKind::Pi(args) => run_shortcut("pi", args),
         CommandKind::Opencode(args) => run_shortcut("opencode", args),
-        CommandKind::Claude(args) => run_shortcut("claude", args),
-        CommandKind::Copilot(args) => run_shortcut("copilot", args),
         CommandKind::Healthcheck(args) => healthcheck(args),
     }
 }
