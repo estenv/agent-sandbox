@@ -159,10 +159,7 @@ pub fn prepare_settings(
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let settings = render_settings(projects_root, daemon_sock, allowed_domains)?;
 
-    let tmp_path = std::env::temp_dir().join(format!(
-        "agent-sandbox-settings-{}.json",
-        std::process::id()
-    ));
+    let tmp_path = std::env::temp_dir().join("agent-sandbox-settings.json");
     std::fs::write(&tmp_path, serde_json::to_string_pretty(&settings)?)?;
     Ok(tmp_path)
 }
