@@ -1,23 +1,86 @@
-use std::env;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 
+use clap::Parser;
+
+use agent_sandbox_helper_daemon::protocol::DaemonCommand;
+
+#[derive(Debug, Parser)]
+#[command(name = "agent-sandbox-helper")]
+#[command(about = "Send commands to the agent-sandbox helper daemon")]
+#[command(version)]
+struct Cli {
+    /// Path to the daemon Unix socket.
+    #[arg(long, env = "HELPER_DAEMON_SOCK")]
+    socket_path: String,
+
+    #[command(subcommand)]
+    command: HelperCommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum HelperCommand {
+    /// Check if the daemon is running
+    Healthz,
+    /// Test connectivity to the daemon
+    Test,
+    /// Pull latest changes in a git repository
+    GitPull {
+        /// Absolute path to the git repository
+        path: String,
+    },
+    /// Push changes in a git repository (blocked on main/master)
+    GitPush {
+        /// Absolute path to the git repository
+        path: String,
+    },
+    /// Create a pull request in Azure DevOps
+    PrCreate {
+        /// Absolute path to the git repository
+        #[arg(long)]
+        path: String,
+        /// PR title
+        #[arg(long)]
+        title: String,
+        /// Source branch
+        #[arg(long)]
+        source: String,
+        /// Target branch (defaults to repository default)
+        #[arg(long)]
+        target: Option<String>,
+        /// PR description
+        #[arg(long)]
+        description: Option<String>,
+    },
+}
+
 fn main() -> ExitCode {
-    let sock = match env::var("HELPER_DAEMON_SOCK") {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("error: HELPER_DAEMON_SOCK is not set");
-            return ExitCode::from(1);
-        }
+    let cli = Cli::parse();
+
+    let cmd = match cli.command {
+        HelperCommand::Healthz => DaemonCommand::Healthz,
+        HelperCommand::Test => DaemonCommand::Test,
+        HelperCommand::GitPull { path } => DaemonCommand::GitPull { path },
+        HelperCommand::GitPush { path } => DaemonCommand::GitPush { path },
+        HelperCommand::PrCreate {
+            path,
+            title,
+            source,
+            target,
+            description,
+        } => DaemonCommand::PrCreate {
+            path,
+            title,
+            source,
+            target,
+            description,
+        },
     };
 
-    let mut path: String = env::args().skip(1).collect::<Vec<_>>().join(" ");
-    if path.is_empty() {
-        path = "healthz".to_string();
-    }
+    let wire = cmd.to_wire();
 
-    let mut conn = match UnixStream::connect(&sock) {
+    let mut conn = match UnixStream::connect(&cli.socket_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to connect to daemon socket: {e}");
@@ -25,7 +88,7 @@ fn main() -> ExitCode {
         }
     };
 
-    if let Err(e) = writeln!(conn, "{path}") {
+    if let Err(e) = writeln!(conn, "{wire}") {
         eprintln!("error: failed to send request: {e}");
         return ExitCode::from(1);
     }

@@ -10,33 +10,6 @@ pub struct PrParams {
     pub description: Option<String>,
 }
 
-pub fn parse_pr_params(arg: &str) -> Result<PrParams, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(arg).map_err(|e| format!("invalid pr-create JSON: {e}"))?;
-
-    let obj = v
-        .as_object()
-        .ok_or("pr-create params must be a JSON object")?;
-
-    let extract = |key: &str| -> Result<String, String> {
-        obj.get(key)
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("missing required field '{key}'"))
-    };
-
-    Ok(PrParams {
-        path: extract("path")?,
-        title: extract("title")?,
-        source: extract("source")?,
-        target: obj.get("target").and_then(|v| v.as_str()).map(String::from),
-        description: obj
-            .get("description")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-    })
-}
-
 enum GitProvider {
     AzureDevops {
         org: String,
@@ -352,29 +325,5 @@ mod tests {
     #[test]
     fn test_parse_ado_ssh_rejects_non_ado() {
         assert!(try_parse_ado_ssh("git@github.com:owner/repo.git").is_none());
-    }
-
-    #[test]
-    fn test_parse_pr_params_all_fields() {
-        let params = parse_pr_params(
-            r#"{"path":"/repo","title":"My PR","source":"feature","target":"main","description":"desc"}"#,
-        )
-        .unwrap();
-        assert_eq!(params.path, "/repo");
-        assert_eq!(params.title, "My PR");
-        assert_eq!(params.source, "feature");
-        assert_eq!(params.target.as_deref(), Some("main"));
-        assert_eq!(params.description.as_deref(), Some("desc"));
-    }
-
-    #[test]
-    fn test_parse_pr_params_optional_fields_omitted() {
-        let params =
-            parse_pr_params(r#"{"path":"/repo","title":"PR","source":"feature"}"#).unwrap();
-        assert_eq!(params.path, "/repo");
-        assert_eq!(params.title, "PR");
-        assert_eq!(params.source, "feature");
-        assert!(params.target.is_none());
-        assert!(params.description.is_none());
     }
 }

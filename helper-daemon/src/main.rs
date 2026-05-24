@@ -1,12 +1,14 @@
 mod ado;
 mod git;
 
-use clap::Parser;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+use agent_sandbox_helper_daemon::protocol;
+use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[command(name = "agent-sandbox-helper-daemon")]
@@ -103,19 +105,20 @@ pub fn err_response(error: impl Into<String>) -> String {
 }
 
 pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
-    let line = line.trim_start_matches('/').trim();
-    let mut parts = line.splitn(2, ' ');
-    let action = parts.next().unwrap_or("");
-    let arg = parts.next().unwrap_or("").trim();
+    let cmd = match protocol::DaemonCommand::from_wire(line) {
+        Ok(c) => c,
+        Err(e) => return err_response(e),
+    };
 
-    match action {
-        "healthz" => ok_response(serde_json::json!({"service": "agent-sandbox-helper-daemon"})),
-        "test" => ok_response(serde_json::json!({"message": "helper daemon connectivity works"})),
-        "git-pull" => {
-            if arg.is_empty() {
-                return err_response("usage: git-pull <absolute-path>");
-            }
-            let cwd = Path::new(arg);
+    match cmd {
+        protocol::DaemonCommand::Healthz => {
+            ok_response(serde_json::json!({"service": "agent-sandbox-helper-daemon"}))
+        }
+        protocol::DaemonCommand::Test => {
+            ok_response(serde_json::json!({"message": "helper daemon connectivity works"}))
+        }
+        protocol::DaemonCommand::GitPull { path } => {
+            let cwd = Path::new(&path);
             if !cwd.is_absolute() {
                 return err_response("path must be absolute");
             }
@@ -129,11 +132,8 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             }
             git::git_pull(cwd)
         }
-        "git-push" => {
-            if arg.is_empty() {
-                return err_response("usage: git-push <absolute-path>");
-            }
-            let cwd = Path::new(arg);
+        protocol::DaemonCommand::GitPush { path } => {
+            let cwd = Path::new(&path);
             if !cwd.is_absolute() {
                 return err_response("path must be absolute");
             }
@@ -147,14 +147,22 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             }
             git::git_push(cwd)
         }
-        "pr-create" => {
-            let params = match ado::parse_pr_params(arg) {
-                Ok(p) => p,
-                Err(e) => return err_response(e),
+        protocol::DaemonCommand::PrCreate {
+            path,
+            title,
+            source,
+            target,
+            description,
+        } => {
+            let params = ado::PrParams {
+                path,
+                title,
+                source,
+                target,
+                description,
             };
             ado::pr_create(&params, projects_root)
         }
-        _ => err_response("not found"),
     }
 }
 
