@@ -117,6 +117,12 @@ pub fn run(
         cmd.env("NUGET_PACKAGES", host_nuget);
     }
 
+    // Inject git identity from host's global config so git works inside
+    // the sandbox without needing access to any git config files.
+    for (key, val) in host_git_identity() {
+        cmd.env(key, val);
+    }
+
     if let Some(agent_name) = agent::known_for_command(&cmd_name) {
         for &(key, val) in agent::env_vars(agent_name) {
             cmd.env(key, val);
@@ -258,6 +264,24 @@ fn make_executable(path: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn make_executable(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+fn host_git_identity() -> Vec<(String, String)> {
+    let mut vars = Vec::new();
+    for (key, env_prefix) in [("user.name", "GIT_AUTHOR"), ("user.email", "GIT_AUTHOR")] {
+        if let Ok(output) = Command::new("git")
+            .args(["config", "--global", key])
+            .output()
+        {
+            let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !val.is_empty() && output.status.success() {
+                let upper = key.to_uppercase().replace('.', "_");
+                vars.push((format!("{env_prefix}_{upper}"), val.clone()));
+                vars.push((format!("GIT_COMMITTER_{upper}"), val));
+            }
+        }
+    }
+    vars
 }
 
 fn command_name(command: &OsStr) -> String {
