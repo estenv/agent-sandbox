@@ -69,15 +69,7 @@ pub fn load_config() -> Result<WrapperConfig, Box<dyn std::error::Error>> {
     }
 
     let content = std::fs::read_to_string(&config_path)?;
-    let mut config: WrapperConfig = serde_json::from_str(&content)?;
-
-    if let Some(val) = env::var_os("AGENT_SANDBOX_PROJECTS_ROOT") {
-        config.projects_root = val.to_string_lossy().to_string();
-    }
-    if let Some(val) = env::var_os("AGENT_SANDBOX_HOME") {
-        config.sandbox_home = val.to_string_lossy().to_string();
-    }
-
+    let config: WrapperConfig = serde_json::from_str(&content)?;
     Ok(config)
 }
 
