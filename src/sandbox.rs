@@ -69,18 +69,10 @@ pub fn run(
     )));
     daemonized.extend(command);
 
-    let args: Vec<OsString> = vec![
-        OsString::from("srt"),
-        OsString::from("--settings"),
-        dynamic_settings.clone().into(),
-        OsString::from("--"),
-    ]
-    .into_iter()
-    .chain(daemonized)
-    .collect();
-
-    let mut cmd = Command::new(&args[0]);
-    for arg in &args[1..] {
+    let mut cmd = Command::new("srt");
+    cmd.arg("--settings").arg(dynamic_settings.as_os_str());
+    cmd.arg("--");
+    for arg in daemonized {
         cmd.arg(arg);
     }
     cmd.env("HOME", sandbox_home.join("home"))

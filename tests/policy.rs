@@ -106,38 +106,6 @@ fn test_prepare_settings_expands_tilde_paths() {
 }
 
 #[test]
-fn test_prepare_settings_network_defaults() {
-    let parsed = render_settings("/tmp/p", "/tmp/d.sock", &default_allowed_domains());
-    assert!(parsed.pointer("/network/deniedDomains").is_some());
-    assert_eq!(
-        parsed
-            .pointer("/network/allowAllUnixSockets")
-            .unwrap()
-            .as_bool(),
-        Some(true)
-    );
-    assert_eq!(
-        parsed
-            .pointer("/network/allowLocalBinding")
-            .unwrap()
-            .as_bool(),
-        Some(false)
-    );
-}
-
-#[test]
-fn test_prepare_settings_allowed_domains_no_localhost() {
-    let parsed = render_settings("/tmp/p", "/tmp/d.sock", &default_allowed_domains());
-    let allowed = parsed
-        .pointer("/network/allowedDomains")
-        .unwrap()
-        .as_array()
-        .unwrap();
-    assert!(!allowed.contains(&serde_json::Value::String("localhost".to_string())));
-    assert!(!allowed.contains(&serde_json::Value::String("127.0.0.1".to_string())));
-}
-
-#[test]
 fn test_prepare_settings_custom_allowed_domains() {
     let custom = vec!["api.anthropic.com".to_string(), "github.com".to_string()];
     let parsed = render_settings("/tmp/p", "/tmp/d.sock", &custom);

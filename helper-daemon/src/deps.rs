@@ -5,29 +5,22 @@ use crate::err_response;
 use crate::ok_response;
 
 pub fn dep_install(dir: &Path, projects_root: Option<&Path>) -> String {
-    if !dir.is_absolute() {
-        return err_response("path must be absolute");
-    }
-    if let Some(root) = projects_root {
-        if !dir.starts_with(root) {
-            return err_response(format!(
-                "path is outside allowed projects root: {}",
-                dir.display()
-            ));
-        }
-    }
+    let cwd = match crate::validate_path(dir.to_str().unwrap_or_default(), projects_root) {
+        Ok(d) => d,
+        Err(e) => return err_response(e),
+    };
     let lockfiles = [
         "yarn.lock",
         "package-lock.json",
         "pnpm-lock.yaml",
         "uv.lock",
     ];
-    let found_locks: Vec<_> = lockfiles.iter().filter(|f| dir.join(f).exists()).collect();
-    let has_csproj = std::fs::read_dir(dir)
+    let found_locks: Vec<_> = lockfiles.iter().filter(|f| cwd.join(f).exists()).collect();
+    let has_csproj = std::fs::read_dir(cwd)
         .ok()
         .map(|rd| {
             rd.filter_map(|e| e.ok())
-                .any(|e| e.path().extension().map_or(false, |ext| ext == "csproj"))
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "csproj"))
         })
         .unwrap_or(false);
     if found_locks.len() > 1 {
@@ -46,7 +39,7 @@ pub fn dep_install(dir: &Path, projects_root: Option<&Path>) -> String {
     } else {
         return err_response("no recognizable lockfile or .csproj found");
     };
-    match Command::new(prog).current_dir(dir).args(args).output() {
+    match Command::new(prog).current_dir(cwd).args(args).output() {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);

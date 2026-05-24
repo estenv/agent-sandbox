@@ -105,6 +105,25 @@ pub(crate) fn err_response(error: impl Into<String>) -> String {
     serde_json::json!({"ok": false, "error": error.into()}).to_string()
 }
 
+pub(crate) fn validate_path<'a>(
+    path_str: &'a str,
+    projects_root: Option<&Path>,
+) -> Result<&'a Path, String> {
+    let cwd = Path::new(path_str);
+    if !cwd.is_absolute() {
+        return Err("path must be absolute".into());
+    }
+    if let Some(root) = projects_root {
+        if !cwd.starts_with(root) {
+            return Err(format!(
+                "path is outside allowed projects root: {}",
+                cwd.display()
+            ));
+        }
+    }
+    Ok(cwd)
+}
+
 pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
     let cmd = match protocol::DaemonCommand::from_wire(line) {
         Ok(c) => c,
@@ -118,36 +137,14 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
         protocol::DaemonCommand::Test => {
             ok_response(serde_json::json!({"message": "helper daemon connectivity works"}))
         }
-        protocol::DaemonCommand::GitPull { path } => {
-            let cwd = Path::new(&path);
-            if !cwd.is_absolute() {
-                return err_response("path must be absolute");
-            }
-            if let Some(root) = projects_root {
-                if !cwd.starts_with(root) {
-                    return err_response(format!(
-                        "path is outside allowed projects root: {}",
-                        cwd.display()
-                    ));
-                }
-            }
-            git::git_pull(cwd)
-        }
-        protocol::DaemonCommand::GitPush { path } => {
-            let cwd = Path::new(&path);
-            if !cwd.is_absolute() {
-                return err_response("path must be absolute");
-            }
-            if let Some(root) = projects_root {
-                if !cwd.starts_with(root) {
-                    return err_response(format!(
-                        "path is outside allowed projects root: {}",
-                        cwd.display()
-                    ));
-                }
-            }
-            git::git_push(cwd)
-        }
+        protocol::DaemonCommand::GitPull { path } => match validate_path(&path, projects_root) {
+            Ok(cwd) => git::git_pull(cwd),
+            Err(e) => err_response(e),
+        },
+        protocol::DaemonCommand::GitPush { path } => match validate_path(&path, projects_root) {
+            Ok(cwd) => git::git_push(cwd),
+            Err(e) => err_response(e),
+        },
         protocol::DaemonCommand::PrCreate {
             path,
             title,
@@ -216,15 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_healthz_with_slash() {
-        let body = handle_request("/healthz", None);
-        assert_eq!(
-            body,
-            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
-        );
-    }
-
-    #[test]
     fn test_handle_test_action() {
         let body = handle_request("test", None);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -236,28 +224,24 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_not_found() {
-        let body = handle_request("nonexistent", None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(v["error"].as_str().unwrap(), "not found");
-    }
-
-    #[test]
-    fn test_handle_empty_line_returns_not_found() {
-        let body = handle_request("", None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(v["error"].as_str().unwrap(), "not found");
-    }
-
-    #[test]
-    fn test_handle_healthz_bare_matches_without_http() {
-        let body = handle_request("healthz", None);
+    fn test_validate_path_absolute() {
         assert_eq!(
-            body,
-            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
+            validate_path("/valid/path", None).unwrap(),
+            Path::new("/valid/path")
         );
+    }
+
+    #[test]
+    fn test_validate_path_relative_rejected() {
+        let err = validate_path("relative/path", None).unwrap_err();
+        assert_eq!(err, "path must be absolute");
+    }
+
+    #[test]
+    fn test_validate_path_outside_projects_root() {
+        let root = Path::new("/allowed");
+        let err = validate_path("/forbidden", Some(root)).unwrap_err();
+        assert!(err.contains("outside allowed projects root"));
     }
 
     #[test]

@@ -3,29 +3,50 @@ use std::ffi::OsString;
 use std::io;
 use std::process::Command;
 
+struct AgentDef {
+    name: &'static str,
+    commands: &'static [&'static str],
+    package: &'static str,
+    env: &'static [(&'static str, &'static str)],
+}
+
+const AGENTS: &[AgentDef] = &[
+    AgentDef {
+        name: "opencode",
+        commands: &["opencode"],
+        package: "opencode-ai",
+        env: &[("OPENCODE_DISABLE_AUTOUPDATE", "true")],
+    },
+    AgentDef {
+        name: "pi",
+        commands: &["pi", "pi-agent"],
+        package: "@mariozechner/pi-coding-agent",
+        env: &[("PI_OFFLINE", "true")],
+    },
+];
+
 pub fn prepare(agent: &str) -> Result<(), Box<dyn std::error::Error>> {
-    match agent {
-        "opencode" => npm_install_global("opencode-ai")?,
-        "pi" | "pi-agent" => npm_install_global("@mariozechner/pi-coding-agent")?,
-        other => return Err(format!("no preparation recipe for `{other}`").into()),
-    }
+    let def = AGENTS
+        .iter()
+        .find(|a| a.name == agent)
+        .ok_or_else(|| format!("no preparation recipe for `{agent}`"))?;
+    npm_install_global(def.package)?;
     Ok(())
 }
 
 pub fn known_for_command(command: &str) -> Option<&'static str> {
-    match command {
-        "opencode" => Some("opencode"),
-        "pi" | "pi-agent" => Some("pi"),
-        _ => None,
-    }
+    AGENTS
+        .iter()
+        .find(|a| a.commands.contains(&command))
+        .map(|a| a.name)
 }
 
 pub fn env_vars(agent: &str) -> &[(&'static str, &'static str)] {
-    match agent {
-        "opencode" => &[("OPENCODE_DISABLE_AUTOUPDATE", "true")],
-        "pi" => &[("PI_OFFLINE", "true")],
-        _ => &[],
-    }
+    AGENTS
+        .iter()
+        .find(|a| a.name == agent)
+        .map(|a| a.env)
+        .unwrap_or(&[])
 }
 
 fn npm_install_global(package: &str) -> io::Result<()> {

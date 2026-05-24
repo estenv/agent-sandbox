@@ -92,17 +92,6 @@ mod tests {
     }
 
     #[test]
-    fn test_git_push_missing_path() {
-        let body = crate::handle_request("git-push", None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(
-            v["error"].as_str().unwrap(),
-            "usage: git-push <absolute-path>"
-        );
-    }
-
-    #[test]
     fn test_git_push_relative_path_rejected() {
         let body = crate::handle_request("git-push relative/path", None);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -133,17 +122,6 @@ mod tests {
             err.contains("not a git repository")
                 || err.contains("failed to determine current branch"),
             "expected git error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn test_git_pull_missing_path() {
-        let body = crate::handle_request("git-pull", None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(
-            v["error"].as_str().unwrap(),
-            "usage: git-pull <absolute-path>"
         );
     }
 

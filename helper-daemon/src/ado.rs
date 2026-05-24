@@ -20,18 +20,10 @@ enum GitProvider {
 }
 
 pub fn pr_create(params: &PrParams, projects_root: Option<&Path>) -> String {
-    let cwd = Path::new(&params.path);
-    if !cwd.is_absolute() {
-        return crate::err_response("path must be absolute");
-    }
-    if let Some(root) = projects_root {
-        if !cwd.starts_with(root) {
-            return crate::err_response(format!(
-                "path is outside allowed projects root: {}",
-                cwd.display()
-            ));
-        }
-    }
+    let cwd = match crate::validate_path(&params.path, projects_root) {
+        Ok(cwd) => cwd,
+        Err(e) => return crate::err_response(e),
+    };
 
     let provider = match detect_provider(cwd) {
         Ok(p) => p,
@@ -173,18 +165,10 @@ fn create_ado_pr(cwd: &Path, org: &str, project: &str, repo: &str, params: &PrPa
 }
 
 pub fn wi_list(path: &str, projects_root: Option<&Path>) -> String {
-    let cwd = Path::new(path);
-    if !cwd.is_absolute() {
-        return crate::err_response("path must be absolute");
-    }
-    if let Some(root) = projects_root {
-        if !cwd.starts_with(root) {
-            return crate::err_response(format!(
-                "path is outside allowed projects root: {}",
-                cwd.display()
-            ));
-        }
-    }
+    let cwd = match crate::validate_path(path, projects_root) {
+        Ok(cwd) => cwd,
+        Err(e) => return crate::err_response(e),
+    };
 
     let provider = match detect_provider(cwd) {
         Ok(p) => p,
@@ -234,18 +218,10 @@ pub fn wi_create(
     r#type: Option<&str>,
     projects_root: Option<&Path>,
 ) -> String {
-    let cwd = Path::new(path);
-    if !cwd.is_absolute() {
-        return crate::err_response("path must be absolute");
-    }
-    if let Some(root) = projects_root {
-        if !cwd.starts_with(root) {
-            return crate::err_response(format!(
-                "path is outside allowed projects root: {}",
-                cwd.display()
-            ));
-        }
-    }
+    let cwd = match crate::validate_path(path, projects_root) {
+        Ok(cwd) => cwd,
+        Err(e) => return crate::err_response(e),
+    };
 
     let provider = match detect_provider(cwd) {
         Ok(p) => p,
