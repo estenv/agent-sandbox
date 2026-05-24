@@ -9,6 +9,7 @@ fn render_settings(
         &PathBuf::from(projects_root),
         &PathBuf::from(daemon_sock),
         allowed_domains,
+        &[],
     )
     .unwrap()
 }
@@ -167,6 +168,51 @@ fn test_prepare_settings_allow_write_contains_cargo() {
         .iter()
         .any(|v| v.as_str().is_some_and(|s| s.contains("/.cargo")));
     assert!(has_cargo, "allowWrite should contain ~/.cargo path");
+}
+
+fn render_settings_with_extra(
+    projects_root: &str,
+    daemon_sock: &str,
+    allowed_domains: &[String],
+    extra_write_dirs: &[PathBuf],
+) -> serde_json::Value {
+    agent_sandbox::policy::render_settings(
+        &PathBuf::from(projects_root),
+        &PathBuf::from(daemon_sock),
+        allowed_domains,
+        extra_write_dirs,
+    )
+    .unwrap()
+}
+
+#[test]
+fn test_prepare_settings_extra_write_dirs_in_both_lists() {
+    let extra = vec![PathBuf::from("/home/user/agent-configs")];
+    let parsed = render_settings_with_extra("/tmp/proj", "/tmp/d.sock", &[], &extra);
+
+    let allow_read = parsed
+        .pointer("/filesystem/allowRead")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert!(
+        allow_read.contains(&serde_json::Value::String(
+            "/home/user/agent-configs".to_string()
+        )),
+        "extra dir should appear in allowRead"
+    );
+
+    let allow_write = parsed
+        .pointer("/filesystem/allowWrite")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert!(
+        allow_write.contains(&serde_json::Value::String(
+            "/home/user/agent-configs".to_string()
+        )),
+        "extra dir should appear in allowWrite"
+    );
 }
 
 #[test]

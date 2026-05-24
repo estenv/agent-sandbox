@@ -16,6 +16,8 @@ pub struct WrapperConfig {
     pub sandbox_home: String,
     #[serde(default)]
     pub network: NetworkConfig,
+    #[serde(default)]
+    pub extra_write_dirs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

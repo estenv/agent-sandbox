@@ -16,6 +16,7 @@ pub fn run(
     workspace_arg: Option<PathBuf>,
     projects_root_arg: Option<PathBuf>,
     no_prepare: bool,
+    extra_write_dirs: Vec<PathBuf>,
     command: Vec<OsString>,
 ) -> Result<u8, Box<dyn std::error::Error>> {
     let cfg = config::load_config()?;
@@ -39,11 +40,24 @@ pub fn run(
         env::set_current_dir(&projects_root)?;
     }
 
+    // Merge extra write dirs from config file and CLI
+    let mut all_extra_dirs: Vec<PathBuf> = Vec::new();
+    for d in &cfg.extra_write_dirs {
+        all_extra_dirs.push(config::resolve_path(d)?);
+    }
+    for d in &extra_write_dirs {
+        all_extra_dirs.push(config::resolve_path(&d.to_string_lossy())?);
+    }
+
     let daemon_sock = sandbox_home.join("daemon.sock");
     ensure_daemon_running(&daemon_sock, &projects_root)?;
 
-    let dynamic_settings =
-        policy::prepare_settings(&projects_root, &daemon_sock, &cfg.network.allowed_domains)?;
+    let dynamic_settings = policy::prepare_settings(
+        &projects_root,
+        &daemon_sock,
+        &cfg.network.allowed_domains,
+        &all_extra_dirs,
+    )?;
 
     ensure_workspace_dirs(&sandbox_home)?;
     configure_agent_runtime(&sandbox_home, &command[0])?;

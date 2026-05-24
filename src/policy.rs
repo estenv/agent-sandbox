@@ -123,6 +123,7 @@ pub fn render_settings(
     projects_root: &Path,
     daemon_sock: &Path,
     allowed_domains: &[String],
+    extra_write_dirs: &[PathBuf],
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let home = host_home();
     let mut settings: serde_json::Value = serde_json::from_str(DEFAULT_SETTINGS_JSON)?;
@@ -187,6 +188,29 @@ pub fn render_settings(
         }
     }
 
+    // Add user-specified extra write directories to both allowRead and allowWrite.
+    // These let the host have additional dirs (e.g. agent config repos) that the
+    // sandbox can read/write, while still denying access to the rest of home.
+    for extra_dir in extra_write_dirs {
+        let s = extra_dir.to_string_lossy().to_string();
+        if let Some(allow_read) = settings
+            .pointer_mut("/filesystem/allowRead")
+            .and_then(|v| v.as_array_mut())
+        {
+            if !allow_read.iter().any(|v| v.as_str() == Some(&s)) {
+                allow_read.push(s.clone().into());
+            }
+        }
+        if let Some(allow_write) = settings
+            .pointer_mut("/filesystem/allowWrite")
+            .and_then(|v| v.as_array_mut())
+        {
+            if !allow_write.iter().any(|v| v.as_str() == Some(&s)) {
+                allow_write.push(s.into());
+            }
+        }
+    }
+
     // Expand all ~ paths to absolute paths against the REAL host home,
     // before SRT overrides $HOME to the sandbox home.
     expand_tilde_in_arrays(&mut settings, &home);
@@ -198,8 +222,14 @@ pub fn prepare_settings(
     projects_root: &Path,
     daemon_sock: &Path,
     allowed_domains: &[String],
+    extra_write_dirs: &[PathBuf],
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let settings = render_settings(projects_root, daemon_sock, allowed_domains)?;
+    let settings = render_settings(
+        projects_root,
+        daemon_sock,
+        allowed_domains,
+        extra_write_dirs,
+    )?;
 
     let tmp_path = std::env::temp_dir().join("agent-sandbox-settings.json");
     std::fs::write(&tmp_path, serde_json::to_string_pretty(&settings)?)?;

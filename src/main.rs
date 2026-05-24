@@ -50,6 +50,9 @@ struct RunArgs {
     /// Do not auto-install known missing agent commands.
     #[arg(long)]
     no_prepare: bool,
+    /// Additional host directories the sandbox can write to (repeatable).
+    #[arg(long)]
+    allow_write: Vec<PathBuf>,
     /// Command and arguments to run after `--`.
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<OsString>,
@@ -66,6 +69,9 @@ struct ShortcutArgs {
     /// Do not auto-install the agent if the command is missing.
     #[arg(long)]
     no_prepare: bool,
+    /// Additional host directories the sandbox can write to (repeatable).
+    #[arg(long)]
+    allow_write: Vec<PathBuf>,
     /// Arguments passed to the agent.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<OsString>,
@@ -79,6 +85,9 @@ struct HealthcheckArgs {
     /// Projects root directory. Defaults to the value in config.toml.
     #[arg(long)]
     projects_root: Option<PathBuf>,
+    /// Additional host directories the sandbox can write to (repeatable).
+    #[arg(long)]
+    allow_write: Vec<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -110,6 +119,7 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
             args.workspace,
             args.projects_root,
             args.no_prepare,
+            args.allow_write,
             args.command,
         ),
         CommandKind::Pi(args) => run_shortcut("pi", args),
@@ -125,6 +135,7 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::
         shortcut.workspace,
         shortcut.projects_root,
         shortcut.no_prepare,
+        shortcut.allow_write,
         command,
     )
 }
@@ -134,5 +145,11 @@ fn healthcheck(args: HealthcheckArgs) -> Result<u8, Box<dyn std::error::Error>> 
         OsString::from("agent-sandbox-helper"),
         OsString::from("healthz"),
     ];
-    sandbox::run(args.workspace, args.projects_root, true, command)
+    sandbox::run(
+        args.workspace,
+        args.projects_root,
+        true,
+        args.allow_write,
+        command,
+    )
 }
