@@ -1,7 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU32;
-
-static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn host_home() -> PathBuf {
     crate::config::home_dir().expect("HOME must be set before srt spawns")
@@ -162,13 +159,10 @@ pub fn prepare_settings(
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let settings = render_settings(projects_root, daemon_sock, allowed_domains)?;
 
-    let tmp_dir = std::env::temp_dir().join(format!(
-        "agent-sandbox-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    let tmp_path = std::env::temp_dir().join(format!(
+        "agent-sandbox-settings-{}.json",
+        std::process::id()
     ));
-    std::fs::create_dir_all(&tmp_dir)?;
-    let tmp_path = tmp_dir.join("settings.json");
     std::fs::write(&tmp_path, serde_json::to_string_pretty(&settings)?)?;
     Ok(tmp_path)
 }
