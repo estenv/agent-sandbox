@@ -281,7 +281,10 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("nonexistent-subdir");
         let body = crate::handle_request(
-            &format!(r#"pr-create {{"path":"{}","title":"t","source":"f"}}"#, path.display()),
+            &format!(
+                r#"pr-create {{"path":"{}","title":"t","source":"f"}}"#,
+                path.display()
+            ),
             None,
         );
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();

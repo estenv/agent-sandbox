@@ -19,7 +19,11 @@ fn render_settings(
 
 #[test]
 fn test_prepare_settings_writes_valid_json() {
-    let parsed = render_settings("/tmp/proj", "/tmp/daemon/test.sock", &default_allowed_domains());
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/daemon/test.sock",
+        &default_allowed_domains(),
+    );
     assert!(parsed.pointer("/network").is_some());
     assert!(parsed.pointer("/filesystem").is_some());
     assert!(parsed.pointer("/ignoreViolations").is_some());
@@ -27,7 +31,11 @@ fn test_prepare_settings_writes_valid_json() {
 
 #[test]
 fn test_prepare_settings_replaces_dot_with_projects_root() {
-    let parsed = render_settings("/tmp/test-projects", "/tmp/daemon/test.sock", &default_allowed_domains());
+    let parsed = render_settings(
+        "/tmp/test-projects",
+        "/tmp/daemon/test.sock",
+        &default_allowed_domains(),
+    );
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
         .unwrap()
@@ -39,7 +47,11 @@ fn test_prepare_settings_replaces_dot_with_projects_root() {
 
 #[test]
 fn test_prepare_settings_adds_daemon_socket_dir_to_allow_write() {
-    let parsed = render_settings("/tmp/proj", "/tmp/daemon-dir/test.sock", &default_allowed_domains());
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/daemon-dir/test.sock",
+        &default_allowed_domains(),
+    );
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
         .unwrap()
@@ -50,7 +62,11 @@ fn test_prepare_settings_adds_daemon_socket_dir_to_allow_write() {
 
 #[test]
 fn test_prepare_settings_no_duplicate_daemon_socket_dir() {
-    let parsed = render_settings("/tmp/proj", "/tmp/daemon/test.sock", &default_allowed_domains());
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/daemon/test.sock",
+        &default_allowed_domains(),
+    );
     let count = parsed
         .pointer("/filesystem/allowWrite")
         .unwrap()

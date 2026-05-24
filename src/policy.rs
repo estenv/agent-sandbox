@@ -233,5 +233,4 @@ mod tests {
         assert_eq!(val.pointer("/count").unwrap(), 42);
         assert_eq!(val.pointer("/enabled").unwrap(), true);
     }
-
 }

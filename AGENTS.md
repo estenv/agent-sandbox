@@ -9,13 +9,10 @@ Convenience wrapper around [Anthropic Sandbox Runtime](https://github.com/anthro
 | `agent-sandbox` | `src/` | CLI wrapper: config, policy generation, agent prep, sandbox launch |
 | `agent-sandbox-helper-daemon` | `helper-daemon/` | Host-side daemon for privileged operations, communicates over Unix sockets |
 | `agent-sandbox-helper` | `helper-daemon/` | Unix socket client for agents inside the sandbox |
-| `sandbox-tests` | `sandbox-tests/` | End-to-end tests that run inside the real sealed sandbox via `srt` |
 
 ## Quick verification
 
 Run `./verification.sh` after every change before considering it complete — it formats, lints with auto-fix, runs the basic test suite, and does a healthcheck.
-
-Whenever changes affect sandbox-daemon interaction, run sandbox tests as a final step: `cargo test -p sandbox-tests -- --ignored`.
 
 ## Test rules
 
