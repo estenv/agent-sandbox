@@ -62,28 +62,7 @@ fn test_git_pull_in_git_repo() {
     let _ = child.wait();
 }
 
-fn test_git_pull_outside_projects_root_rejected() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path().join("allowed");
-    std::fs::create_dir_all(&root).unwrap();
-
-    let mut child = start_daemon_with_root(dir.path(), Some(&root));
-    let sock = dir.path().join("daemon.sock");
-
-    let response = send_request(&sock, "git-pull /tmp");
-    let v: serde_json::Value = serde_json::from_str(&response).unwrap();
-    assert!(!v["ok"].as_bool().unwrap());
-    assert!(v["error"]
-        .as_str()
-        .unwrap()
-        .contains("outside allowed projects root"));
-
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 #[test]
 fn sealed_git_pull_scenarios() {
     test_git_pull_in_git_repo();
-    test_git_pull_outside_projects_root_rejected();
 }

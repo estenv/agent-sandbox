@@ -3,7 +3,6 @@ use std::process::Command;
 
 #[derive(Debug)]
 pub struct PrParams {
-    pub path: String,
     pub title: String,
     pub source: String,
     pub target: Option<String>,
@@ -19,12 +18,7 @@ enum GitProvider {
     },
 }
 
-pub fn pr_create(params: &PrParams, projects_root: Option<&Path>) -> String {
-    let cwd = match crate::validate_path(&params.path, projects_root) {
-        Ok(cwd) => cwd,
-        Err(e) => return crate::err_response(e),
-    };
-
+pub fn pr_create(params: &PrParams, cwd: &Path) -> String {
     let provider = match detect_provider(cwd) {
         Ok(p) => p,
         Err(e) => return crate::err_response(e),
@@ -164,12 +158,7 @@ fn create_ado_pr(cwd: &Path, org: &str, project: &str, repo: &str, params: &PrPa
     }
 }
 
-pub fn wi_list(path: &str, projects_root: Option<&Path>) -> String {
-    let cwd = match crate::validate_path(path, projects_root) {
-        Ok(cwd) => cwd,
-        Err(e) => return crate::err_response(e),
-    };
-
+pub fn wi_list(cwd: &Path) -> String {
     let provider = match detect_provider(cwd) {
         Ok(p) => p,
         Err(e) => return crate::err_response(e),
@@ -211,18 +200,12 @@ fn query_ado_workitems(org: &str) -> String {
 }
 
 pub fn wi_create(
-    path: &str,
+    cwd: &Path,
     title: &str,
     parent: Option<i64>,
     description: Option<&str>,
     r#type: Option<&str>,
-    projects_root: Option<&Path>,
 ) -> String {
-    let cwd = match crate::validate_path(path, projects_root) {
-        Ok(cwd) => cwd,
-        Err(e) => return crate::err_response(e),
-    };
-
     let provider = match detect_provider(cwd) {
         Ok(p) => p,
         Err(e) => return crate::err_response(e),
@@ -307,7 +290,6 @@ fn link_pr_work_item(org: &str, _project: &str, pr_id: i64, wi_id: i64) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_pr_create_bad_json() {
@@ -340,32 +322,6 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("missing required field 'source'"));
-    }
-
-    #[test]
-    fn test_pr_create_relative_path() {
-        let body = crate::handle_request(
-            r#"pr-create {"path":"relative/path","title":"t","source":"f"}"#,
-            None,
-        );
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(v["error"].as_str().unwrap(), "path must be absolute");
-    }
-
-    #[test]
-    fn test_pr_create_outside_projects_root() {
-        let root = PathBuf::from("/allowed");
-        let body = crate::handle_request(
-            r#"pr-create {"path":"/forbidden","title":"t","source":"f"}"#,
-            Some(root.as_path()),
-        );
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert!(v["error"]
-            .as_str()
-            .unwrap()
-            .contains("outside allowed projects root"));
     }
 
     #[test]

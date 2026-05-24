@@ -152,51 +152,48 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             target,
             description,
             work_item,
-        } => {
-            let params = ado::PrParams {
-                path,
-                title,
-                source,
-                target,
-                description,
-                work_item,
-            };
-            ado::pr_create(&params, projects_root)
-        }
-        protocol::DaemonCommand::DepInstall { path } => {
-            let dir = Path::new(&path);
-            deps::dep_install(dir, projects_root)
-        }
-        protocol::DaemonCommand::WiList { path } => ado::wi_list(&path, projects_root),
+        } => match validate_path(&path, projects_root) {
+            Ok(cwd) => {
+                let params = ado::PrParams {
+                    title,
+                    source,
+                    target,
+                    description,
+                    work_item,
+                };
+                ado::pr_create(&params, cwd)
+            }
+            Err(e) => err_response(e),
+        },
+        protocol::DaemonCommand::DepInstall { path } => match validate_path(&path, projects_root) {
+            Ok(cwd) => deps::dep_install(cwd),
+            Err(e) => err_response(e),
+        },
+        protocol::DaemonCommand::WiList { path } => match validate_path(&path, projects_root) {
+            Ok(cwd) => ado::wi_list(cwd),
+            Err(e) => err_response(e),
+        },
         protocol::DaemonCommand::WiCreate {
             path,
             title,
             parent,
             description,
             r#type,
-        } => ado::wi_create(
-            &path,
-            &title,
-            parent,
-            description.as_deref(),
-            r#type.as_deref(),
-            projects_root,
-        ),
+        } => match validate_path(&path, projects_root) {
+            Ok(cwd) => ado::wi_create(
+                cwd,
+                &title,
+                parent,
+                description.as_deref(),
+                r#type.as_deref(),
+            ),
+            Err(e) => err_response(e),
+        },
     }
 }
 
 fn resolve_path(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix('~') {
-        if let Ok(home) = std::env::var("HOME") {
-            let home = PathBuf::from(home);
-            if rest.is_empty() || rest == "/" {
-                return home;
-            }
-            let rest = rest.trim_start_matches('/');
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(path)
+    agent_sandbox::config::resolve_path(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
 #[cfg(test)]
@@ -206,9 +203,11 @@ mod tests {
     #[test]
     fn test_handle_healthz() {
         let body = handle_request("healthz", None);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["ok"].as_bool(), Some(true));
         assert_eq!(
-            body,
-            r#"{"ok":true,"service":"agent-sandbox-helper-daemon"}"#
+            v["service"].as_str().unwrap(),
+            "agent-sandbox-helper-daemon"
         );
     }
 
@@ -263,9 +262,7 @@ mod tests {
 
     #[test]
     fn test_resolve_path_relative() {
-        assert_eq!(
-            resolve_path("relative/path"),
-            PathBuf::from("relative/path")
-        );
+        let expected = std::env::current_dir().unwrap().join("relative/path");
+        assert_eq!(resolve_path("relative/path"), expected);
     }
 }

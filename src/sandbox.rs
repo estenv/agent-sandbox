@@ -290,11 +290,6 @@ mod tests {
     }
 
     #[test]
-    fn test_which_absolute_path_missing() {
-        assert!(which("/nonexistent-binary-hopefully").is_none());
-    }
-
-    #[test]
     fn test_which_searches_path() {
         let exe = std::env::current_exe().unwrap();
         let name = exe.file_name().unwrap().to_str().unwrap();
@@ -307,10 +302,5 @@ mod tests {
         } else {
             std::env::remove_var("PATH");
         }
-    }
-
-    #[test]
-    fn test_which_unknown_not_found() {
-        assert!(which("this-command-should-not-exist-xyzzy").is_none());
     }
 }

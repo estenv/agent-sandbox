@@ -4,11 +4,7 @@ use std::process::Command;
 use crate::err_response;
 use crate::ok_response;
 
-pub fn dep_install(dir: &Path, projects_root: Option<&Path>) -> String {
-    let cwd = match crate::validate_path(dir.to_str().unwrap_or_default(), projects_root) {
-        Ok(d) => d,
-        Err(e) => return err_response(e),
-    };
+pub fn dep_install(cwd: &Path) -> String {
     let lockfiles = [
         "yarn.lock",
         "package-lock.json",

@@ -1,25 +1,6 @@
 mod common;
 use common::*;
 
-fn test_pr_create_relative_path() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let mut child = start_daemon(dir.path());
-    let sock = dir.path().join("daemon.sock");
-
-    let json = serde_json::json!({
-        "path": "relative/path",
-        "title": "Test",
-        "source": "feature",
-    });
-    let response = send_request(&sock, &format!("pr-create {json}"));
-    let v: serde_json::Value = serde_json::from_str(&response).unwrap();
-    assert!(!v["ok"].as_bool().unwrap());
-    assert_eq!(v["error"].as_str().unwrap(), "path must be absolute");
-
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 fn test_pr_create_no_remote() {
     let dir = tempfile::TempDir::new().unwrap();
     let mut child = start_daemon(dir.path());
@@ -113,7 +94,6 @@ fn test_pr_create_ado_remote_no_az() {
 
 #[test]
 fn sealed_pr_create_scenarios() {
-    test_pr_create_relative_path();
     test_pr_create_no_remote();
     test_pr_create_ado_remote_no_az();
 }

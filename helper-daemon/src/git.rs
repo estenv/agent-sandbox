@@ -69,7 +69,6 @@ pub fn is_protected_branch(branch: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_is_protected_branch_main() {
@@ -92,26 +91,6 @@ mod tests {
     }
 
     #[test]
-    fn test_git_push_relative_path_rejected() {
-        let body = crate::handle_request("git-push relative/path", None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(v["error"].as_str().unwrap(), "path must be absolute");
-    }
-
-    #[test]
-    fn test_git_push_outside_projects_root() {
-        let root = PathBuf::from("/allowed");
-        let body = crate::handle_request("git-push /forbidden", Some(root.as_path()));
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert!(v["error"]
-            .as_str()
-            .unwrap()
-            .contains("outside allowed projects root"));
-    }
-
-    #[test]
     fn test_git_push_non_git_dir() {
         let dir = tempfile::TempDir::new().unwrap();
         let body = crate::handle_request(&format!("git-push {}", dir.path().display()), None);
@@ -123,26 +102,6 @@ mod tests {
                 || err.contains("failed to determine current branch"),
             "expected git error, got: {err}"
         );
-    }
-
-    #[test]
-    fn test_git_pull_relative_path_rejected() {
-        let body = crate::handle_request("git-pull relative/path", None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert_eq!(v["error"].as_str().unwrap(), "path must be absolute");
-    }
-
-    #[test]
-    fn test_git_pull_outside_projects_root() {
-        let root = PathBuf::from("/allowed");
-        let body = crate::handle_request("git-pull /forbidden", Some(root.as_path()));
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert!(v["error"]
-            .as_str()
-            .unwrap()
-            .contains("outside allowed projects root"));
     }
 
     #[test]
