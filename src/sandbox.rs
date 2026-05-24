@@ -94,6 +94,12 @@ pub fn run(
         .env("npm_config_fund", "false")
         .env("npm_config_update_notifier", "false");
 
+    if let Some(agent_name) = agent::known_for_command(&cmd_name) {
+        for &(key, val) in agent::env_vars(agent_name) {
+            cmd.env(key, val);
+        }
+    }
+
     let mut child = cmd.spawn().unwrap_or_else(|e| {
         eprintln!("agent-sandbox: failed to spawn srt: {e}");
         std::process::exit(127);
@@ -198,26 +204,11 @@ fn configure_agent_runtime(workspace: &Path, command: &OsStr) -> io::Result<()> 
         );
     }
 
-    match command_name(command).as_str() {
-        "opencode" => {
-            let cfg = workspace.join("config/opencode");
-            fs::create_dir_all(&cfg)?;
-            write_if_missing(&cfg.join("opencode.json"), "{}\n")?;
-            write_if_missing(&cfg.join("tui.json"), "{}\n")?;
-        }
-        "pi" | "pi-agent" => {
-            let pi_dir = workspace.join("home/.pi/agent");
-            fs::create_dir_all(&pi_dir)?;
-            let deny_npm = workspace.join("bin/agent-sandbox-npm-deny");
-            write_if_missing(
-                &deny_npm,
-                "#!/usr/bin/env bash\nprintf 'agent-sandbox: npm is disabled inside the sandbox; run host preparation or use the future helper daemon.\\n' >&2\nexit 126\n",
-            )?;
-            make_executable(&deny_npm)?;
-            let pi_settings = format!("{{\n  \"npmCommand\": [\"{}\"]\n}}\n", deny_npm.display());
-            write_if_missing(&pi_dir.join("settings.json"), &pi_settings)?;
-        }
-        _ => {}
+    if command_name(command).as_str() == "opencode" {
+        let cfg = workspace.join("config/opencode");
+        fs::create_dir_all(&cfg)?;
+        write_if_missing(&cfg.join("opencode.json"), "{}\n")?;
+        write_if_missing(&cfg.join("tui.json"), "{}\n")?;
     }
 
     Ok(())
