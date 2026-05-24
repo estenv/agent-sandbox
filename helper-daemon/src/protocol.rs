@@ -22,6 +22,13 @@ pub enum DaemonCommand {
     WiList {
         path: String,
     },
+    WiCreate {
+        path: String,
+        title: String,
+        parent: Option<i64>,
+        description: Option<String>,
+        r#type: Option<String>,
+    },
 }
 
 impl DaemonCommand {
@@ -54,6 +61,28 @@ impl DaemonCommand {
             }
             Self::DepInstall { path } => format!("dep-install {path}"),
             Self::WiList { path } => format!("wi-list {path}"),
+            Self::WiCreate {
+                path,
+                title,
+                parent,
+                description,
+                r#type,
+            } => {
+                let mut obj = serde_json::json!({
+                    "path": path,
+                    "title": title,
+                });
+                if let Some(p) = parent {
+                    obj["parent"] = serde_json::json!(p);
+                }
+                if let Some(d) = description {
+                    obj["description"] = serde_json::json!(d);
+                }
+                if let Some(t) = r#type {
+                    obj["type"] = serde_json::json!(t);
+                }
+                format!("wi-create {obj}")
+            }
         }
     }
 
@@ -126,6 +155,31 @@ impl DaemonCommand {
                 }
                 Ok(Self::WiList {
                     path: arg.to_string(),
+                })
+            }
+            "wi-create" => {
+                let v: serde_json::Value = serde_json::from_str(arg)
+                    .map_err(|e| format!("invalid wi-create JSON: {e}"))?;
+                let obj = v
+                    .as_object()
+                    .ok_or_else(|| "wi-create params must be a JSON object".to_string())?;
+
+                let extract = |key: &str| -> Result<String, String> {
+                    obj.get(key)
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| format!("missing required field '{key}'"))
+                };
+
+                Ok(Self::WiCreate {
+                    path: extract("path")?,
+                    title: extract("title")?,
+                    parent: obj.get("parent").and_then(|v| v.as_i64()),
+                    description: obj
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    r#type: obj.get("type").and_then(|v| v.as_str()).map(String::from),
                 })
             }
             _ => Err("not found".into()),

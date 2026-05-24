@@ -222,6 +222,85 @@ fn query_ado_workitems(org: &str) -> String {
     }
 }
 
+pub fn wi_create(
+    path: &str,
+    title: &str,
+    parent: Option<i64>,
+    description: Option<&str>,
+    r#type: Option<&str>,
+    projects_root: Option<&Path>,
+) -> String {
+    let cwd = Path::new(path);
+    if !cwd.is_absolute() {
+        return crate::err_response("path must be absolute");
+    }
+    if let Some(root) = projects_root {
+        if !cwd.starts_with(root) {
+            return crate::err_response(format!(
+                "path is outside allowed projects root: {}",
+                cwd.display()
+            ));
+        }
+    }
+
+    let provider = match detect_provider(cwd) {
+        Ok(p) => p,
+        Err(e) => return crate::err_response(e),
+    };
+
+    match provider {
+        GitProvider::AzureDevops {
+            org,
+            project: _,
+            repo: _,
+        } => create_ado_workitem(&org, title, parent, description, r#type),
+    }
+}
+
+fn create_ado_workitem(
+    org: &str,
+    title: &str,
+    parent: Option<i64>,
+    description: Option<&str>,
+    r#type: Option<&str>,
+) -> String {
+    let typ = r#type.unwrap_or("Task");
+    let mut cmd = Command::new("az");
+    cmd.arg("boards")
+        .arg("work-item")
+        .arg("create")
+        .arg("--org")
+        .arg(format!("https://dev.azure.com/{org}"))
+        .arg("--type")
+        .arg(typ)
+        .arg("--title")
+        .arg(title)
+        .arg("--output")
+        .arg("json");
+
+    if let Some(p) = parent {
+        cmd.arg("--parents").arg(p.to_string());
+    }
+    if let Some(d) = description {
+        cmd.arg("--description").arg(d);
+    }
+
+    match cmd.output() {
+        Ok(out) => {
+            if out.status.success() {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                crate::ok_response(
+                    serde_json::json!({"provider":"azure-devops","raw":stdout.trim()}),
+                )
+            } else {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                crate::err_response(format!("az work-item create failed: {}", stderr.trim()))
+            }
+        }
+        Err(e) => crate::err_response(format!("failed execute az: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

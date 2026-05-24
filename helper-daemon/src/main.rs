@@ -169,6 +169,20 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             deps::dep_install(dir, projects_root)
         }
         protocol::DaemonCommand::WiList { path } => ado::wi_list(&path, projects_root),
+        protocol::DaemonCommand::WiCreate {
+            path,
+            title,
+            parent,
+            description,
+            r#type,
+        } => ado::wi_create(
+            &path,
+            &title,
+            parent,
+            description.as_deref(),
+            r#type.as_deref(),
+            projects_root,
+        ),
     }
 }
 

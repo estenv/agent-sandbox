@@ -63,6 +63,24 @@ enum HelperCommand {
         /// Absolute path to the git repository (to detect provider)
         path: String,
     },
+    /// Create work item (task by default); optional parent link + desc
+    WiCreate {
+        /// Absolute path to git repo (provider detect)
+        #[arg(long)]
+        path: String,
+        /// Work item title (required)
+        #[arg(long)]
+        title: String,
+        /// Parent work item ID to link under
+        #[arg(long)]
+        parent: Option<i64>,
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+        /// Work item type (defaults to Task)
+        #[arg(long)]
+        r#type: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -88,6 +106,19 @@ fn main() -> ExitCode {
         },
         HelperCommand::DepInstall { path } => DaemonCommand::DepInstall { path },
         HelperCommand::WiList { path } => DaemonCommand::WiList { path },
+        HelperCommand::WiCreate {
+            path,
+            title,
+            parent,
+            description,
+            r#type,
+        } => DaemonCommand::WiCreate {
+            path,
+            title,
+            parent,
+            description,
+            r#type,
+        },
     };
 
     let wire = cmd.to_wire();
