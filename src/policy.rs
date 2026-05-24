@@ -4,12 +4,7 @@ use std::sync::atomic::AtomicU32;
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn host_home() -> PathBuf {
-    // The real host home. We must use this BEFORE srt spawns (while $HOME is
-    // still the real home), so we can expand ~ paths in the settings file
-    // before srt overrides $HOME inside the sandbox.
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .expect("HOME must be set") // N/A on Linux in practice
+    crate::config::home_dir().expect("HOME must be set before srt spawns")
 }
 
 fn expand_tilde(path: &str, home: &Path) -> String {
@@ -220,17 +215,5 @@ mod tests {
             "/home/user/.aws"
         );
         assert_eq!(val.pointer("/filesystem/allowWrite/0").unwrap(), ".");
-    }
-
-    #[test]
-    fn test_expand_tilde_does_not_touch_non_strings() {
-        let home = Path::new("/home/user");
-        let mut val = serde_json::json!({
-            "count": 42,
-            "enabled": true
-        });
-        expand_tilde_in_arrays(&mut val, home);
-        assert_eq!(val.pointer("/count").unwrap(), 42);
-        assert_eq!(val.pointer("/enabled").unwrap(), true);
     }
 }

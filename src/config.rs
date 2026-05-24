@@ -107,7 +107,7 @@ pub fn resolve_path(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     }
 }
 
-fn home_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn home_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| "HOME is not set".into())

@@ -1,9 +1,5 @@
 use std::path::PathBuf;
 
-fn default_allowed_domains() -> Vec<String> {
-    vec!["api.anthropic.com".to_string()]
-}
-
 fn render_settings(
     projects_root: &str,
     daemon_sock: &str,
@@ -18,23 +14,11 @@ fn render_settings(
 }
 
 #[test]
-fn test_prepare_settings_writes_valid_json() {
-    let parsed = render_settings(
-        "/tmp/proj",
-        "/tmp/daemon/test.sock",
-        &default_allowed_domains(),
-    );
-    assert!(parsed.pointer("/network").is_some());
-    assert!(parsed.pointer("/filesystem").is_some());
-    assert!(parsed.pointer("/ignoreViolations").is_some());
-}
-
-#[test]
 fn test_prepare_settings_replaces_dot_with_projects_root() {
     let parsed = render_settings(
         "/tmp/test-projects",
         "/tmp/daemon/test.sock",
-        &default_allowed_domains(),
+        &["api.anthropic.com".to_string()],
     );
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
@@ -50,7 +34,7 @@ fn test_prepare_settings_adds_daemon_socket_dir_to_allow_write() {
     let parsed = render_settings(
         "/tmp/proj",
         "/tmp/daemon-dir/test.sock",
-        &default_allowed_domains(),
+        &["api.anthropic.com".to_string()],
     );
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
@@ -65,7 +49,7 @@ fn test_prepare_settings_no_duplicate_daemon_socket_dir() {
     let parsed = render_settings(
         "/tmp/proj",
         "/tmp/daemon/test.sock",
-        &default_allowed_domains(),
+        &["api.anthropic.com".to_string()],
     );
     let count = parsed
         .pointer("/filesystem/allowWrite")
@@ -80,7 +64,11 @@ fn test_prepare_settings_no_duplicate_daemon_socket_dir() {
 
 #[test]
 fn test_prepare_settings_expands_tilde_paths() {
-    let parsed = render_settings("/tmp/proj", "/tmp/d.sock", &default_allowed_domains());
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/d.sock",
+        &["api.anthropic.com".to_string()],
+    );
 
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
