@@ -118,7 +118,9 @@ pub(crate) fn validate_path(
 ) -> Result<PathBuf, String> {
     let cwd = std::fs::canonicalize(path_str).map_err(|e| format!("path does not resolve: {e}"))?;
     if let Some(root) = projects_root {
-        if !cwd.starts_with(root) {
+        let root = std::fs::canonicalize(root)
+            .map_err(|e| format!("projects_root does not resolve: {e}"))?;
+        if !cwd.starts_with(&root) {
             return Err(format!(
                 "path is outside allowed projects root: {}",
                 cwd.display()

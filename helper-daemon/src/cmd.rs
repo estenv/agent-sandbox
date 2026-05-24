@@ -1,3 +1,4 @@
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
@@ -11,15 +12,20 @@ pub fn run_output(
     timeout: Duration,
     label: &str,
 ) -> Result<Output, String> {
-    let child = Command::new(prog)
+    let mut command = Command::new(prog);
+    command
         .args(args)
         .current_dir(cwd)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    command.process_group(0);
+
+    let child = command
         .spawn()
         .map_err(|e| format!("failed to spawn {label}: {e}"))?;
 
-    let pid = child.id();
+    let pgid = child.id();
     let (tx, rx) = mpsc::channel();
 
     thread::spawn(move || {
@@ -29,7 +35,11 @@ pub fn run_output(
     match rx.recv_timeout(timeout) {
         Ok(result) => result.map_err(|e| format!("{label} wait failed: {e}")),
         Err(_) => {
-            let _ = Command::new("kill").arg(pid.to_string()).output();
+            // Kill the entire process group (negative PID), not just the leader
+            let _ = Command::new("kill")
+                .arg("--")
+                .arg(format!("-{}", pgid))
+                .output();
             Err(format!("{label} timed out after {}s", timeout.as_secs()))
         }
     }
