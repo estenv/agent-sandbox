@@ -102,7 +102,7 @@ pub fn resolve_path(path: &str) -> Result<PathBuf> {
     }
 }
 
-pub(crate) fn home_dir() -> Result<PathBuf> {
+pub fn home_dir() -> Result<PathBuf> {
     env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("HOME is not set"))

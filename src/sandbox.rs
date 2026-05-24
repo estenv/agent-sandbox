@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -175,11 +175,26 @@ fn sibling_binary(name: &str) -> Result<PathBuf> {
     }
 }
 
+fn healthz_check(conn: &mut UnixStream) -> bool {
+    if writeln!(conn, "healthz").is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 256];
+    if conn.read(&mut buf).is_err() {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(&buf)
+        .ok()
+        .and_then(|v| v.get("ok")?.as_bool())
+        == Some(true)
+}
+
 fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()> {
     // Already running?
     if let Ok(mut conn) = UnixStream::connect(socket_path) {
-        let _ = writeln!(conn, "healthz");
-        return Ok(());
+        if healthz_check(&mut conn) {
+            return Ok(());
+        }
     }
 
     // Ensure parent directory exists
@@ -201,8 +216,9 @@ fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()>
     // Wait for socket to appear (poll 5s), verify liveness via health check
     for _ in 0..50 {
         if let Ok(mut conn) = UnixStream::connect(socket_path) {
-            let _ = writeln!(conn, "healthz");
-            return Ok(());
+            if healthz_check(&mut conn) {
+                return Ok(());
+            }
         }
         if let Some(status) = child.try_wait()? {
             return Err(anyhow!("daemon exited prematurely with {status}"));
@@ -281,16 +297,15 @@ fn make_executable(_path: &Path) -> io::Result<()> {
 
 fn host_git_identity() -> Vec<(String, String)> {
     let mut vars = Vec::new();
-    for (key, env_prefix) in [("user.name", "GIT_AUTHOR"), ("user.email", "GIT_AUTHOR")] {
+    for (key, suffix) in [("user.name", "NAME"), ("user.email", "EMAIL")] {
         if let Ok(output) = Command::new("git")
             .args(["config", "--global", key])
             .output()
         {
             let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !val.is_empty() && output.status.success() {
-                let upper = key.to_uppercase().replace('.', "_");
-                vars.push((format!("{env_prefix}_{upper}"), val.clone()));
-                vars.push((format!("GIT_COMMITTER_{upper}"), val));
+                vars.push((format!("GIT_AUTHOR_{suffix}"), val.clone()));
+                vars.push((format!("GIT_COMMITTER_{suffix}"), val));
             }
         }
     }

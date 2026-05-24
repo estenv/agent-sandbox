@@ -120,6 +120,14 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
 }
 "#;
 
+fn push_to_array(settings: &mut serde_json::Value, path: &str, item: String) {
+    if let Some(arr) = settings.pointer_mut(path).and_then(|v| v.as_array_mut()) {
+        if !arr.iter().any(|v| v.as_str() == Some(&item)) {
+            arr.push(item.into());
+        }
+    }
+}
+
 pub fn render_settings(
     projects_root: &Path,
     daemon_sock: &Path,
@@ -141,15 +149,12 @@ pub fn render_settings(
     }
 
     // Add the daemon socket's parent dir to allowWrite so bwrap bind-mounts it rw
-    if let Some(allow_write) = settings
-        .pointer_mut("/filesystem/allowWrite")
-        .and_then(|v| v.as_array_mut())
-    {
-        let sock_dir = daemon_sock.parent().unwrap();
-        let abs = sock_dir.to_string_lossy().to_string();
-        if !allow_write.iter().any(|v| v.as_str() == Some(&abs)) {
-            allow_write.push(abs.into());
-        }
+    if let Some(sock_dir) = daemon_sock.parent() {
+        push_to_array(
+            &mut settings,
+            "/filesystem/allowWrite",
+            sock_dir.to_string_lossy().to_string(),
+        );
     }
 
     // Expand "." in allowWrite to the resolved projects root
@@ -165,17 +170,12 @@ pub fn render_settings(
     }
 
     // Populate allowRead with discovered tool paths
-    let tool_paths = discover_allow_read_paths(&home);
-    if let Some(allow_read) = settings
-        .pointer_mut("/filesystem/allowRead")
-        .and_then(|v| v.as_array_mut())
-    {
-        for p in &tool_paths {
-            let s = p.to_string_lossy().to_string();
-            if !allow_read.iter().any(|v| v.as_str() == Some(&s)) {
-                allow_read.push(s.into());
-            }
-        }
+    for p in &discover_allow_read_paths(&home) {
+        push_to_array(
+            &mut settings,
+            "/filesystem/allowRead",
+            p.to_string_lossy().to_string(),
+        );
     }
 
     // Only add ~/.cargo to allowWrite if it exists on the host
@@ -194,22 +194,8 @@ pub fn render_settings(
     // sandbox can read/write, while still denying access to the rest of home.
     for extra_dir in extra_write_dirs {
         let s = extra_dir.to_string_lossy().to_string();
-        if let Some(allow_read) = settings
-            .pointer_mut("/filesystem/allowRead")
-            .and_then(|v| v.as_array_mut())
-        {
-            if !allow_read.iter().any(|v| v.as_str() == Some(&s)) {
-                allow_read.push(s.clone().into());
-            }
-        }
-        if let Some(allow_write) = settings
-            .pointer_mut("/filesystem/allowWrite")
-            .and_then(|v| v.as_array_mut())
-        {
-            if !allow_write.iter().any(|v| v.as_str() == Some(&s)) {
-                allow_write.push(s.into());
-            }
-        }
+        push_to_array(&mut settings, "/filesystem/allowRead", s.clone());
+        push_to_array(&mut settings, "/filesystem/allowWrite", s);
     }
 
     // Expand all ~ paths to absolute paths against the REAL host home,

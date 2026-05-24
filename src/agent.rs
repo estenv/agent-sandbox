@@ -1,8 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io;
 use std::path::Path;
 use std::process::Command;
 
@@ -79,22 +78,23 @@ pub fn is_prepared(command: &str, sandbox_home: &Path) -> bool {
         .exists()
 }
 
-fn npm_install_prefix(package: &str, prefix: &Path) -> io::Result<()> {
+fn npm_install_prefix(package: &str, prefix: &Path) -> Result<()> {
     fs::create_dir_all(prefix)?;
-    let npm = env::var_os("AGENT_SANDBOX_NPM").unwrap_or_else(|| OsString::from("npm"));
+    let npm = env::var_os("AGENT_SANDBOX_NPM").unwrap_or(OsString::from("npm"));
     let status = Command::new(npm)
         .arg("install")
         .arg("--prefix")
         .arg(prefix)
         .arg("-g")
         .arg(package)
-        .status()?;
+        .status()
+        .context("failed to execute npm install")?;
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!(
+        Err(anyhow!(
             "npm install --prefix {} -g {package} failed",
             prefix.display()
-        )))
+        ))
     }
 }

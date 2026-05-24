@@ -4,7 +4,7 @@ mod deps;
 mod git;
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -88,20 +88,20 @@ fn real_main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_connection(mut stream: UnixStream, projects_root: Option<&Path>) -> std::io::Result<()> {
-    let mut buffer = [0_u8; 4096];
-    let n = stream.read(&mut buffer)?;
-    let request = String::from_utf8_lossy(&buffer[..n]);
-    let line = request.lines().next().unwrap_or_default().trim().to_owned();
+fn handle_connection(stream: UnixStream, projects_root: Option<&Path>) -> std::io::Result<()> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
 
-    let body = handle_request(&line, projects_root);
+    let body = handle_request(line.trim(), projects_root);
+    let mut stream = reader.into_inner();
     stream.write_all(body.as_bytes())?;
     stream.flush()
 }
 
 pub(crate) fn ok_response(data: serde_json::Value) -> String {
     let mut resp = serde_json::json!({"ok": true});
-    if let serde_json::Value::Object(ref mut obj) = resp {
+    if let Some(obj) = resp.as_object_mut() {
         if let serde_json::Value::Object(extra) = data {
             obj.extend(extra);
         }
