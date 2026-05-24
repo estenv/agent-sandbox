@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
@@ -38,7 +39,7 @@ impl Default for NetworkConfig {
     }
 }
 
-pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
+pub fn init() -> Result<u8> {
     let config_dir = config_dir()?;
     let config_path = config_dir.join("config.json");
     let workspace = resolve_path("~/.agent-sandbox")?;
@@ -57,7 +58,7 @@ pub fn init() -> Result<u8, Box<dyn std::error::Error>> {
     Ok(0)
 }
 
-pub fn load_config() -> Result<WrapperConfig, Box<dyn std::error::Error>> {
+pub fn load_config() -> Result<WrapperConfig> {
     let config_dir = config_dir()?;
     let config_path = config_dir.join("config.json");
 
@@ -75,14 +76,14 @@ pub fn load_config() -> Result<WrapperConfig, Box<dyn std::error::Error>> {
     Ok(config)
 }
 
-pub fn config_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn config_dir() -> Result<PathBuf> {
     if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(xdg).join("agent-sandbox"));
     }
     Ok(home_dir()?.join(".config/agent-sandbox"))
 }
 
-pub fn resolve_path(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn resolve_path(path: &str) -> Result<PathBuf> {
     let expanded = if let Some(rest) = path.strip_prefix('~') {
         let home = home_dir()?;
         if rest.is_empty() || rest == "/" {
@@ -101,8 +102,8 @@ pub fn resolve_path(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     }
 }
 
-pub(crate) fn home_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn home_dir() -> Result<PathBuf> {
     env::var_os("HOME")
         .map(PathBuf::from)
-        .ok_or_else(|| "HOME is not set".into())
+        .ok_or_else(|| anyhow!("HOME is not set"))
 }

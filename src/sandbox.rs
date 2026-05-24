@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -18,7 +19,7 @@ pub fn run(
     no_prepare: bool,
     extra_write_dirs: Vec<PathBuf>,
     command: Vec<OsString>,
-) -> Result<u8, Box<dyn std::error::Error>> {
+) -> Result<u8> {
     let cfg = config::load_config()?;
     let projects_root = projects_root_arg
         .map(Ok)
@@ -156,27 +157,26 @@ pub fn run(
     Ok(status.code().unwrap_or(1) as u8)
 }
 
-fn sibling_binary(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn sibling_binary(name: &str) -> Result<PathBuf> {
     let exe = env::current_exe()?;
     let parent = exe
         .parent()
-        .ok_or("cannot determine path of current executable")?;
+        .ok_or_else(|| anyhow!("cannot determine path of current executable"))?;
     let candidate = parent.join(name);
     if candidate.exists() {
         Ok(candidate)
     } else {
-        Err(format!(
+        Err(anyhow!(
             "binary not found next to this executable: expected {}",
             candidate.display()
-        )
-        .into())
+        ))
     }
 }
 
 fn ensure_daemon_running(
     socket_path: &Path,
     projects_root: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     // Already running?
     if let Ok(mut conn) = UnixStream::connect(socket_path) {
         let _ = writeln!(conn, "healthz");
@@ -206,12 +206,12 @@ fn ensure_daemon_running(
             return Ok(());
         }
         if let Some(status) = child.try_wait()? {
-            return Err(format!("daemon exited prematurely with {status}").into());
+            return Err(anyhow!("daemon exited prematurely with {status}"));
         }
         thread::sleep(Duration::from_millis(100));
     }
 
-    Err("daemon socket did not appear within 5s".into())
+    Err(anyhow!("daemon socket did not appear within 5s"))
 }
 
 pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {

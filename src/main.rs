@@ -4,6 +4,7 @@ mod policy;
 mod sandbox;
 
 use clap::{Args, Parser, Subcommand};
+use anyhow::Result;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -100,7 +101,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
+fn real_main() -> Result<u8> {
     let cli = Cli::parse();
     match cli.command {
         CommandKind::Init => config::init(),
@@ -128,7 +129,7 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
     }
 }
 
-fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::error::Error>> {
+fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8> {
     let mut command = vec![OsString::from(agent)];
     command.extend(shortcut.args);
     sandbox::run(
@@ -140,7 +141,7 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8, Box<dyn std::
     )
 }
 
-fn healthcheck(args: HealthcheckArgs) -> Result<u8, Box<dyn std::error::Error>> {
+fn healthcheck(args: HealthcheckArgs) -> Result<u8> {
     let command = vec![
         OsString::from("agent-sandbox-helper"),
         OsString::from("healthz"),

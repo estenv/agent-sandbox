@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -28,11 +29,11 @@ const AGENTS: &[AgentDef] = &[
     },
 ];
 
-pub fn prepare(agent: &str, sandbox_home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn prepare(agent: &str, sandbox_home: &Path) -> Result<()> {
     let def = AGENTS
         .iter()
         .find(|a| a.name == agent)
-        .ok_or_else(|| format!("no preparation recipe for `{agent}`"))?;
+        .ok_or_else(|| anyhow!("no preparation recipe for `{agent}`"))?;
     npm_install_prefix(def.package, &sandbox_home.join("npm-prefix"))?;
     symlink_binaries(def.commands, sandbox_home)?;
     Ok(())

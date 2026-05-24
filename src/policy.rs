@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -124,7 +125,7 @@ pub fn render_settings(
     daemon_sock: &Path,
     allowed_domains: &[String],
     extra_write_dirs: &[PathBuf],
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<serde_json::Value> {
     let home = host_home();
     let mut settings: serde_json::Value = serde_json::from_str(DEFAULT_SETTINGS_JSON)?;
 
@@ -223,7 +224,7 @@ pub fn prepare_settings(
     daemon_sock: &Path,
     allowed_domains: &[String],
     extra_write_dirs: &[PathBuf],
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+) -> Result<PathBuf> {
     let settings = render_settings(
         projects_root,
         daemon_sock,
