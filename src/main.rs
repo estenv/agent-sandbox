@@ -3,8 +3,8 @@ mod config;
 mod policy;
 mod sandbox;
 
-use clap::{Args, Parser, Subcommand};
 use anyhow::Result;
+use clap::{Args, Parser, Subcommand};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -26,6 +26,14 @@ enum CommandKind {
     Prepare {
         /// Known agent name: pi, or opencode (also accepts pi-agent).
         agent: String,
+        /// Sandbox-visible runtime state root. Defaults to the value in config.
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+    },
+    /// Install a known tool (npm package) in the sandbox home.
+    PrepareTool {
+        /// Known tool name: codegraph.
+        tool: String,
         /// Sandbox-visible runtime state root. Defaults to the value in config.
         #[arg(long)]
         workspace: Option<PathBuf>,
@@ -114,6 +122,17 @@ fn real_main() -> Result<u8> {
                 }
             };
             agent::prepare(&agent, &sandbox_home)?;
+            Ok(0)
+        }
+        CommandKind::PrepareTool { tool, workspace } => {
+            let sandbox_home = match workspace {
+                Some(p) => p,
+                None => {
+                    let cfg = config::load_config()?;
+                    config::resolve_path(&cfg.sandbox_home)?
+                }
+            };
+            agent::prepare_tool(&tool, &sandbox_home)?;
             Ok(0)
         }
         CommandKind::Run(args) => sandbox::run(

@@ -3,7 +3,6 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -29,13 +28,31 @@ const AGENTS: &[AgentDef] = &[
     },
 ];
 
+struct ToolDef {
+    name: &'static str,
+    package: &'static str,
+}
+
+const TOOLS: &[ToolDef] = &[ToolDef {
+    name: "codegraph",
+    package: "@colbymchenry/codegraph",
+}];
+
 pub fn prepare(agent: &str, sandbox_home: &Path) -> Result<()> {
     let def = AGENTS
         .iter()
         .find(|a| a.name == agent)
         .ok_or_else(|| anyhow!("no preparation recipe for `{agent}`"))?;
     npm_install_prefix(def.package, &sandbox_home.join("npm-prefix"))?;
-    symlink_binaries(def.commands, sandbox_home)?;
+    Ok(())
+}
+
+pub fn prepare_tool(tool: &str, sandbox_home: &Path) -> Result<()> {
+    let def = TOOLS
+        .iter()
+        .find(|t| t.name == tool)
+        .ok_or_else(|| anyhow!("no preparation recipe for tool `{tool}`"))?;
+    npm_install_prefix(def.package, &sandbox_home.join("npm-prefix"))?;
     Ok(())
 }
 
@@ -55,8 +72,11 @@ pub fn env_vars(agent: &str) -> &[(&'static str, &'static str)] {
 }
 
 pub fn is_prepared(command: &str, sandbox_home: &Path) -> bool {
-    let bin = sandbox_home.join("bin").join(command);
-    bin.exists()
+    sandbox_home
+        .join("npm-prefix")
+        .join("bin")
+        .join(command)
+        .exists()
 }
 
 fn npm_install_prefix(package: &str, prefix: &Path) -> io::Result<()> {
@@ -77,23 +97,4 @@ fn npm_install_prefix(package: &str, prefix: &Path) -> io::Result<()> {
             prefix.display()
         )))
     }
-}
-
-fn symlink_binaries(commands: &[&str], sandbox_home: &Path) -> io::Result<()> {
-    let bin_dir = sandbox_home.join("bin");
-    fs::create_dir_all(&bin_dir)?;
-    let npm_bin = sandbox_home.join("npm-prefix").join("bin");
-
-    for cmd in commands {
-        let src = npm_bin.join(cmd);
-        let dst = bin_dir.join(cmd);
-        if src.exists() {
-            let _ = fs::remove_file(&dst);
-            fs::copy(&src, &dst)?;
-            let mut perms = fs::metadata(&dst)?.permissions();
-            perms.set_mode(perms.mode() | 0o111);
-            fs::set_permissions(&dst, perms)?;
-        }
-    }
-    Ok(())
 }

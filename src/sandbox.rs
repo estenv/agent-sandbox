@@ -75,15 +75,17 @@ pub fn run(
     // allow-read tool dirs. Strip out inaccessible home entries.
     let allowed = policy::discover_allow_read_paths(&host_home);
     let current_path = env::var_os("PATH").unwrap_or_default();
-    let sandbox_path = env::join_paths(std::iter::once(sandbox_home.join("bin")).chain(
-        env::split_paths(&current_path).filter(|p| {
-            if p.starts_with(&host_home) {
-                allowed.iter().any(|a| p.starts_with(a))
-            } else {
-                true
-            }
-        }),
-    ))?;
+    let sandbox_path = env::join_paths(
+        std::iter::once(sandbox_home.join("npm-prefix").join("bin"))
+            .chain(std::iter::once(sandbox_home.join("bin")))
+            .chain(env::split_paths(&current_path).filter(|p| {
+                if p.starts_with(&host_home) {
+                    allowed.iter().any(|a| p.starts_with(a))
+                } else {
+                    true
+                }
+            })),
+    )?;
 
     let mut daemonized: Vec<OsString> = Vec::new();
     daemonized.push(OsString::from("env"));
@@ -173,10 +175,7 @@ fn sibling_binary(name: &str) -> Result<PathBuf> {
     }
 }
 
-fn ensure_daemon_running(
-    socket_path: &Path,
-    projects_root: &Path,
-) -> Result<()> {
+fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()> {
     // Already running?
     if let Ok(mut conn) = UnixStream::connect(socket_path) {
         let _ = writeln!(conn, "healthz");

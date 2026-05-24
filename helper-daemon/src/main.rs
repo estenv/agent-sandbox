@@ -26,7 +26,6 @@ struct Cli {
     /// Restrict file operations to this root directory.
     #[arg(long)]
     projects_root: Option<String>,
-
 }
 
 fn main() -> ExitCode {
@@ -89,10 +88,7 @@ fn real_main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_connection(
-    mut stream: UnixStream,
-    projects_root: Option<&Path>,
-) -> std::io::Result<()> {
+fn handle_connection(mut stream: UnixStream, projects_root: Option<&Path>) -> std::io::Result<()> {
     let mut buffer = [0_u8; 4096];
     let n = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..n]);
