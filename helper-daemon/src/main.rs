@@ -1,4 +1,5 @@
 mod ado;
+mod deps;
 mod git;
 
 use std::fs;
@@ -90,7 +91,7 @@ fn handle_connection(mut stream: UnixStream, projects_root: Option<&Path>) -> st
     stream.flush()
 }
 
-pub fn ok_response(data: serde_json::Value) -> String {
+pub(crate) fn ok_response(data: serde_json::Value) -> String {
     let mut resp = serde_json::json!({"ok": true});
     if let serde_json::Value::Object(ref mut obj) = resp {
         if let serde_json::Value::Object(extra) = data {
@@ -100,7 +101,7 @@ pub fn ok_response(data: serde_json::Value) -> String {
     resp.to_string()
 }
 
-pub fn err_response(error: impl Into<String>) -> String {
+pub(crate) fn err_response(error: impl Into<String>) -> String {
     serde_json::json!({"ok": false, "error": error.into()}).to_string()
 }
 
@@ -162,6 +163,10 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
                 description,
             };
             ado::pr_create(&params, projects_root)
+        }
+        protocol::DaemonCommand::DepInstall { path } => {
+            let dir = Path::new(&path);
+            deps::dep_install(dir, projects_root)
         }
     }
 }

@@ -16,6 +16,9 @@ pub enum DaemonCommand {
         target: Option<String>,
         description: Option<String>,
     },
+    DepInstall {
+        path: String,
+    },
 }
 
 impl DaemonCommand {
@@ -46,6 +49,7 @@ impl DaemonCommand {
                 }
                 format!("pr-create {obj}")
             }
+            Self::DepInstall { path } => format!("dep-install {path}"),
         }
     }
 
@@ -102,6 +106,14 @@ impl DaemonCommand {
                         .get("description")
                         .and_then(|v| v.as_str())
                         .map(String::from),
+                })
+            }
+            "dep-install" => {
+                if arg.is_empty() {
+                    return Err("usage: dep-install <absolute-path>".into());
+                }
+                Ok(Self::DepInstall {
+                    path: arg.to_string(),
                 })
             }
             _ => Err("not found".into()),

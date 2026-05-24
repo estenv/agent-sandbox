@@ -53,6 +53,11 @@ enum HelperCommand {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Install dependencies (detects package manager from lockfile)
+    DepInstall {
+        /// Absolute path to the project directory
+        path: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -76,6 +81,7 @@ fn main() -> ExitCode {
             target,
             description,
         },
+        HelperCommand::DepInstall { path } => DaemonCommand::DepInstall { path },
     };
 
     let wire = cmd.to_wire();
