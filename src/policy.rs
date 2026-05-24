@@ -58,7 +58,12 @@ pub fn discover_allow_read_paths(home: &Path) -> Vec<PathBuf> {
     }
 
     // 2. Well-known tool state directories (may not be in PATH verbatim)
-    for p in &["~/.local/share/mise", "~/.local/bin"] {
+    for p in &[
+        "~/.local/share/mise",
+        "~/.local/bin",
+        "~/.rustup",
+        "~/.nuget",
+    ] {
         let exp = expand_tilde(p, home);
         let path = PathBuf::from(exp);
         if path.exists() {

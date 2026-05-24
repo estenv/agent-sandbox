@@ -105,6 +105,18 @@ pub fn run(
         cmd.env("CARGO_HOME", host_cargo);
     }
 
+    // Point RUSTUP_HOME at the host ~/.rustup so rustup shims can find the toolchain
+    let host_rustup = host_home.join(".rustup");
+    if host_rustup.exists() {
+        cmd.env("RUSTUP_HOME", host_rustup);
+    }
+
+    // Point NUGET_PACKAGES at the host ~/.nuget/packages so dotnet can resolve packages
+    let host_nuget = host_home.join(".nuget/packages");
+    if host_nuget.exists() {
+        cmd.env("NUGET_PACKAGES", host_nuget);
+    }
+
     if let Some(agent_name) = agent::known_for_command(&cmd_name) {
         for &(key, val) in agent::env_vars(agent_name) {
             cmd.env(key, val);
