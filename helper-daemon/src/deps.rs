@@ -1,8 +1,11 @@
 use std::path::Path;
-use std::process::Command;
+use std::time::Duration;
 
+use crate::cmd;
 use crate::err_response;
 use crate::ok_response;
+
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub fn dep_install(cwd: &Path) -> String {
     let lockfiles = [
@@ -35,7 +38,7 @@ pub fn dep_install(cwd: &Path) -> String {
     } else {
         return err_response("no recognizable lockfile or .csproj found");
     };
-    match Command::new(prog).current_dir(cwd).args(args).output() {
+    match cmd::run_output(prog, args, cwd, INSTALL_TIMEOUT, prog) {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -47,6 +50,6 @@ pub fn dep_install(cwd: &Path) -> String {
                 err_response(format!("{} failed: stdout={stdout} stderr={stderr}", prog))
             }
         }
-        Err(e) => err_response(format!("failed to run {}: {}", prog, e)),
+        Err(e) => err_response(e),
     }
 }

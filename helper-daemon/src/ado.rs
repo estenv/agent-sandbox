@@ -356,8 +356,8 @@ mod tests {
         assert!(!v["ok"].as_bool().unwrap());
         let err = v["error"].as_str().unwrap();
         assert!(
-            err.contains("failed to execute git") || err.contains("failed to get remote"),
-            "expected git error, got: {err}"
+            err.contains("path does not resolve"),
+            "expected resolution error, got: {err}"
         );
     }
 

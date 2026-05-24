@@ -1,12 +1,15 @@
 mod ado;
+mod cmd;
 mod deps;
 mod git;
 
 use std::fs;
 use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
 
 use agent_sandbox_helper_daemon::protocol;
 use clap::Parser;
@@ -60,6 +63,7 @@ fn real_main() -> std::io::Result<()> {
     let _ = fs::remove_file(&socket_path);
 
     let listener = UnixListener::bind(&socket_path)?;
+    fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
     eprintln!(
         "agent-sandbox-helper-daemon listening on {}",
         socket_path.display()
@@ -68,11 +72,14 @@ fn real_main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(ref err) = handle_connection(stream, projects_root.as_deref()) {
-                    if err.kind() != std::io::ErrorKind::BrokenPipe {
-                        eprintln!("request failed: {err}");
+                let root = projects_root.clone();
+                thread::spawn(move || {
+                    if let Err(ref err) = handle_connection(stream, root.as_deref()) {
+                        if err.kind() != std::io::ErrorKind::BrokenPipe {
+                            eprintln!("request failed: {err}");
+                        }
                     }
-                }
+                });
             }
             Err(err) => eprintln!("accept failed: {err}"),
         }
@@ -105,14 +112,11 @@ pub(crate) fn err_response(error: impl Into<String>) -> String {
     serde_json::json!({"ok": false, "error": error.into()}).to_string()
 }
 
-pub(crate) fn validate_path<'a>(
-    path_str: &'a str,
+pub(crate) fn validate_path(
+    path_str: &str,
     projects_root: Option<&Path>,
-) -> Result<&'a Path, String> {
-    let cwd = Path::new(path_str);
-    if !cwd.is_absolute() {
-        return Err("path must be absolute".into());
-    }
+) -> Result<PathBuf, String> {
+    let cwd = std::fs::canonicalize(path_str).map_err(|e| format!("path does not resolve: {e}"))?;
     if let Some(root) = projects_root {
         if !cwd.starts_with(root) {
             return Err(format!(
@@ -138,11 +142,11 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             ok_response(serde_json::json!({"message": "helper daemon connectivity works"}))
         }
         protocol::DaemonCommand::GitPull { path } => match validate_path(&path, projects_root) {
-            Ok(cwd) => git::git_pull(cwd),
+            Ok(cwd) => git::git_pull(&cwd),
             Err(e) => err_response(e),
         },
         protocol::DaemonCommand::GitPush { path } => match validate_path(&path, projects_root) {
-            Ok(cwd) => git::git_push(cwd),
+            Ok(cwd) => git::git_push(&cwd),
             Err(e) => err_response(e),
         },
         protocol::DaemonCommand::PrCreate {
@@ -161,16 +165,16 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
                     description,
                     work_item,
                 };
-                ado::pr_create(&params, cwd)
+                ado::pr_create(&params, &cwd)
             }
             Err(e) => err_response(e),
         },
         protocol::DaemonCommand::DepInstall { path } => match validate_path(&path, projects_root) {
-            Ok(cwd) => deps::dep_install(cwd),
+            Ok(cwd) => deps::dep_install(&cwd),
             Err(e) => err_response(e),
         },
         protocol::DaemonCommand::WiList { path } => match validate_path(&path, projects_root) {
-            Ok(cwd) => ado::wi_list(cwd),
+            Ok(cwd) => ado::wi_list(&cwd),
             Err(e) => err_response(e),
         },
         protocol::DaemonCommand::WiCreate {
@@ -181,7 +185,7 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             r#type,
         } => match validate_path(&path, projects_root) {
             Ok(cwd) => ado::wi_create(
-                cwd,
+                &cwd,
                 &title,
                 parent,
                 description.as_deref(),
@@ -224,22 +228,20 @@ mod tests {
 
     #[test]
     fn test_validate_path_absolute() {
-        assert_eq!(
-            validate_path("/valid/path", None).unwrap(),
-            Path::new("/valid/path")
-        );
+        let p = validate_path("/tmp", None).unwrap();
+        assert_eq!(p, PathBuf::from("/tmp"));
     }
 
     #[test]
-    fn test_validate_path_relative_rejected() {
-        let err = validate_path("relative/path", None).unwrap_err();
-        assert_eq!(err, "path must be absolute");
+    fn test_validate_path_nonexistent_rejected() {
+        let err = validate_path("/nonexistent_path_xyz", None).unwrap_err();
+        assert!(err.contains("path does not resolve"));
     }
 
     #[test]
     fn test_validate_path_outside_projects_root() {
-        let root = Path::new("/allowed");
-        let err = validate_path("/forbidden", Some(root)).unwrap_err();
+        let root = Path::new("/tmp");
+        let err = validate_path("/etc", Some(root)).unwrap_err();
         assert!(err.contains("outside allowed projects root"));
     }
 

@@ -1,8 +1,13 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+use crate::cmd;
+
+const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub fn git_pull(cwd: &Path) -> String {
-    match Command::new("git").args(["pull"]).current_dir(cwd).output() {
+    match cmd::run_output("git", &["pull"], cwd, GIT_TIMEOUT, "git pull") {
         Ok(output) => {
             let exit_code = output.status.code().unwrap_or(-1);
             serde_json::json!({
@@ -13,7 +18,7 @@ pub fn git_pull(cwd: &Path) -> String {
             })
             .to_string()
         }
-        Err(e) => crate::err_response(format!("failed to execute git: {e}")),
+        Err(e) => crate::err_response(e),
     }
 }
 
@@ -29,7 +34,7 @@ pub fn git_push(cwd: &Path) -> String {
         ));
     }
 
-    match Command::new("git").args(["push"]).current_dir(cwd).output() {
+    match cmd::run_output("git", &["push"], cwd, GIT_TIMEOUT, "git push") {
         Ok(output) => {
             let exit_code = output.status.code().unwrap_or(-1);
             serde_json::json!({
@@ -40,7 +45,7 @@ pub fn git_push(cwd: &Path) -> String {
             })
             .to_string()
         }
-        Err(e) => crate::err_response(format!("failed to execute git: {e}")),
+        Err(e) => crate::err_response(e),
     }
 }
 
