@@ -168,6 +168,7 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             let dir = Path::new(&path);
             deps::dep_install(dir, projects_root)
         }
+        protocol::DaemonCommand::WiList { path } => ado::wi_list(&path, projects_root),
     }
 }
 

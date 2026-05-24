@@ -168,6 +168,60 @@ fn create_ado_pr(cwd: &Path, org: &str, project: &str, repo: &str, params: &PrPa
     }
 }
 
+pub fn wi_list(path: &str, projects_root: Option<&Path>) -> String {
+    let cwd = Path::new(path);
+    if !cwd.is_absolute() {
+        return crate::err_response("path must be absolute");
+    }
+    if let Some(root) = projects_root {
+        if !cwd.starts_with(root) {
+            return crate::err_response(format!(
+                "path is outside allowed projects root: {}",
+                cwd.display()
+            ));
+        }
+    }
+
+    let provider = match detect_provider(cwd) {
+        Ok(p) => p,
+        Err(e) => return crate::err_response(e),
+    };
+
+    match provider {
+        GitProvider::AzureDevops { org, .. } => query_ado_workitems(&org),
+    }
+}
+
+fn query_ado_workitems(org: &str) -> String {
+    let wiql = "SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo] FROM WorkItems WHERE [System.AssignedTo] = @Me ORDER BY [System.ChangedDate] DESC";
+    match Command::new("az")
+        .args([
+            "boards",
+            "query",
+            "--org",
+            &format!("https://dev.azure.com/{org}"),
+            "--wiql",
+            wiql,
+            "--output",
+            "json",
+        ])
+        .output()
+    {
+        Ok(output) => {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                crate::ok_response(
+                    serde_json::json!({ "provider": "azure-devops", "workitems": stdout.trim() }),
+                )
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                crate::err_response(format!("az boards query failed: {}", stderr.trim()))
+            }
+        }
+        Err(e) => crate::err_response(format!("failed to execute az: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

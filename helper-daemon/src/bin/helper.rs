@@ -58,6 +58,11 @@ enum HelperCommand {
         /// Absolute path to the project directory
         path: String,
     },
+    /// List work items assigned to me (uses WIQL via ado cli)
+    WiList {
+        /// Absolute path to the git repository (to detect provider)
+        path: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -82,6 +87,7 @@ fn main() -> ExitCode {
             description,
         },
         HelperCommand::DepInstall { path } => DaemonCommand::DepInstall { path },
+        HelperCommand::WiList { path } => DaemonCommand::WiList { path },
     };
 
     let wire = cmd.to_wire();

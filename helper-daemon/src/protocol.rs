@@ -19,6 +19,9 @@ pub enum DaemonCommand {
     DepInstall {
         path: String,
     },
+    WiList {
+        path: String,
+    },
 }
 
 impl DaemonCommand {
@@ -50,6 +53,7 @@ impl DaemonCommand {
                 format!("pr-create {obj}")
             }
             Self::DepInstall { path } => format!("dep-install {path}"),
+            Self::WiList { path } => format!("wi-list {path}"),
         }
     }
 
@@ -113,6 +117,14 @@ impl DaemonCommand {
                     return Err("usage: dep-install <absolute-path>".into());
                 }
                 Ok(Self::DepInstall {
+                    path: arg.to_string(),
+                })
+            }
+            "wi-list" => {
+                if arg.is_empty() {
+                    return Err("usage: wi-list <absolute-path>".into());
+                }
+                Ok(Self::WiList {
                     path: arg.to_string(),
                 })
             }
