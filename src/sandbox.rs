@@ -291,16 +291,21 @@ mod tests {
 
     #[test]
     fn test_which_searches_path() {
+        struct PathGuard(Option<std::ffi::OsString>);
+        impl Drop for PathGuard {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(p) => std::env::set_var("PATH", p),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+        }
+
         let exe = std::env::current_exe().unwrap();
         let name = exe.file_name().unwrap().to_str().unwrap();
         let parent = exe.parent().unwrap();
-        let prev = std::env::var_os("PATH");
+        let _guard = PathGuard(std::env::var_os("PATH"));
         std::env::set_var("PATH", parent);
         assert!(which(name).is_some(), "should find {name} in {parent:?}");
-        if let Some(p) = prev {
-            std::env::set_var("PATH", p);
-        } else {
-            std::env::remove_var("PATH");
-        }
     }
 }

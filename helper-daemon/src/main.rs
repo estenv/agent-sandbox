@@ -243,25 +243,24 @@ mod tests {
         assert!(err.contains("outside allowed projects root"));
     }
 
-    #[test]
-    fn test_resolve_path_tilde() {
-        std::env::set_var("HOME", "/home/testuser");
-        assert_eq!(resolve_path("~/foo"), PathBuf::from("/home/testuser/foo"));
+    struct EnvGuard(&'static str, Option<std::ffi::OsString>);
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.1 {
+                Some(v) => std::env::set_var(self.0, v),
+                None => std::env::remove_var(self.0),
+            }
+        }
     }
 
+    // resolve_path tests share HOME env — must run serially
     #[test]
-    fn test_resolve_path_tilde_only() {
+    fn test_resolve_path_variants() {
+        let _guard = EnvGuard("HOME", std::env::var_os("HOME"));
         std::env::set_var("HOME", "/home/testuser");
         assert_eq!(resolve_path("~"), PathBuf::from("/home/testuser"));
-    }
-
-    #[test]
-    fn test_resolve_path_absolute() {
+        assert_eq!(resolve_path("~/foo"), PathBuf::from("/home/testuser/foo"));
         assert_eq!(resolve_path("/tmp/bar"), PathBuf::from("/tmp/bar"));
-    }
-
-    #[test]
-    fn test_resolve_path_relative() {
         let expected = std::env::current_dir().unwrap().join("relative/path");
         assert_eq!(resolve_path("relative/path"), expected);
     }
