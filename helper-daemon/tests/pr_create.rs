@@ -2,15 +2,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn unique_dir(label: &str) -> PathBuf {
-    let n = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir().join(format!("as-{label}-{n}"))
-}
 
 fn git() -> Command {
     let mut cmd = Command::new("git");
@@ -21,9 +13,7 @@ fn git() -> Command {
     cmd
 }
 
-fn start_daemon() -> (DaemonGuard, PathBuf) {
-    let dir = unique_dir("pr-test");
-    std::fs::create_dir_all(&dir).unwrap();
+fn start_daemon(dir: &std::path::Path) -> Child {
     let sock = dir.join("daemon.sock");
 
     let mut child = Command::new(daemon_binary())
@@ -55,26 +45,7 @@ fn start_daemon() -> (DaemonGuard, PathBuf) {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    (
-        DaemonGuard {
-            child,
-            dir: dir.clone(),
-        },
-        sock,
-    )
-}
-
-struct DaemonGuard {
-    child: Child,
-    dir: PathBuf,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    child
 }
 
 fn daemon_binary() -> PathBuf {
@@ -99,10 +70,7 @@ fn send_request(sock: &PathBuf, request: &str) -> String {
     String::from_utf8_lossy(&response).to_string()
 }
 
-fn git_init_bare_working() -> (PathBuf, PathBuf) {
-    let dir = unique_dir("pr-scenario");
-    std::fs::create_dir_all(&dir).unwrap();
-
+fn git_init_bare_working(dir: &std::path::Path) -> PathBuf {
     let bare = dir.join("bare.git");
     git()
         .args(["init", "--bare"])
@@ -134,10 +102,10 @@ fn git_init_bare_working() -> (PathBuf, PathBuf) {
         .status()
         .expect("initial push");
 
-    (dir, working)
+    working
 }
 
-fn set_remote_to_ado(working: &PathBuf, org: &str, project: &str, repo: &str) {
+fn set_remote_to_ado(working: &std::path::Path, org: &str, project: &str, repo: &str) {
     let url = format!("https://dev.azure.com/{org}/{project}/_git/{repo}");
     git()
         .args(["remote", "set-url", "origin", &url])
@@ -155,7 +123,10 @@ fn sealed_pr_create_scenarios() {
 }
 
 fn test_pr_create_invalid_json() {
-    let (_guard, sock) = start_daemon();
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut child = start_daemon(dir.path());
+    let sock = dir.path().join("daemon.sock");
+
     let response = send_request(&sock, "pr-create not-json");
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(!v["ok"].as_bool().unwrap());
@@ -163,10 +134,16 @@ fn test_pr_create_invalid_json() {
         .as_str()
         .unwrap()
         .contains("invalid pr-create JSON"));
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn test_pr_create_relative_path() {
-    let (_guard, sock) = start_daemon();
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut child = start_daemon(dir.path());
+    let sock = dir.path().join("daemon.sock");
+
     let json = serde_json::json!({
         "path": "relative/path",
         "title": "Test",
@@ -176,11 +153,17 @@ fn test_pr_create_relative_path() {
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(!v["ok"].as_bool().unwrap());
     assert_eq!(v["error"].as_str().unwrap(), "path must be absolute");
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn test_pr_create_no_remote() {
-    let (_guard, sock) = start_daemon();
-    let (_dir, working) = git_init_bare_working();
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut child = start_daemon(dir.path());
+    let sock = dir.path().join("daemon.sock");
+
+    let working = git_init_bare_working(dir.path());
 
     git()
         .args(["remote", "remove", "origin"])
@@ -202,12 +185,16 @@ fn test_pr_create_no_remote() {
         "expected no-remote error, got: {err}"
     );
 
-    let _ = std::fs::remove_dir_all(&_dir);
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn test_pr_create_ado_remote_no_az() {
-    let (_guard, sock) = start_daemon();
-    let (_dir, working) = git_init_bare_working();
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut child = start_daemon(dir.path());
+    let sock = dir.path().join("daemon.sock");
+
+    let working = git_init_bare_working(dir.path());
 
     set_remote_to_ado(&working, "myorg", "myproject", "myrepo");
 
@@ -251,5 +238,6 @@ fn test_pr_create_ado_remote_no_az() {
         "expected az-related error, got: {err}"
     );
 
-    let _ = std::fs::remove_dir_all(&_dir);
+    let _ = child.kill();
+    let _ = child.wait();
 }

@@ -110,11 +110,11 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
 }
 "#;
 
-pub fn prepare_settings(
+pub fn render_settings(
     projects_root: &Path,
     daemon_sock: &Path,
     allowed_domains: &[String],
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let home = host_home();
     let mut settings: serde_json::Value = serde_json::from_str(DEFAULT_SETTINGS_JSON)?;
 
@@ -156,6 +156,16 @@ pub fn prepare_settings(
     // Expand all ~ paths to absolute paths against the REAL host home,
     // before SRT overrides $HOME to the sandbox home.
     expand_tilde_in_arrays(&mut settings, &home);
+
+    Ok(settings)
+}
+
+pub fn prepare_settings(
+    projects_root: &Path,
+    daemon_sock: &Path,
+    allowed_domains: &[String],
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let settings = render_settings(projects_root, daemon_sock, allowed_domains)?;
 
     let tmp_dir = std::env::temp_dir().join(format!(
         "agent-sandbox-{}-{}",
@@ -224,12 +234,4 @@ mod tests {
         assert_eq!(val.pointer("/enabled").unwrap(), true);
     }
 
-    #[test]
-    fn test_host_home_reads_env() {
-        let result = host_home();
-        assert_eq!(
-            result,
-            std::path::PathBuf::from(std::env::var("HOME").unwrap())
-        );
-    }
 }

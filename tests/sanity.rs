@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 #[test]
 fn test_resolve_path_tilde() {
-    let home = std::env::var("HOME").unwrap();
+    let _guard = ScopedEnv::set("HOME", "/home/testuser");
     assert_eq!(
         agent_sandbox::config::resolve_path("~/foo").unwrap(),
-        PathBuf::from(home).join("foo")
+        PathBuf::from("/home/testuser").join("foo")
     );
 }
 
@@ -18,17 +18,17 @@ fn test_config_dir_uses_xdg_when_set() {
 
 #[test]
 fn test_config_dir_default_when_xdg_unset() {
-    let _guard = ScopedEnv::remove("XDG_CONFIG_HOME");
-    let home = std::env::var("HOME").unwrap();
+    let _home = ScopedEnv::set("HOME", "/home/testuser");
+    let _xdg = ScopedEnv::remove("XDG_CONFIG_HOME");
     let dir = agent_sandbox::config::config_dir().unwrap();
-    assert_eq!(dir, PathBuf::from(home).join(".config/agent-sandbox"));
+    assert_eq!(dir, PathBuf::from("/home/testuser/.config/agent-sandbox"));
 }
 
 #[test]
 fn test_ensure_workspace_dirs() {
-    let tmp = std::env::temp_dir().join("agent-sandbox-test-workspace");
-    let _ = std::fs::remove_dir_all(&tmp);
-    agent_sandbox::sandbox::ensure_workspace_dirs(&tmp).unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("workspace");
+    agent_sandbox::sandbox::ensure_workspace_dirs(&root).unwrap();
     for name in [
         "home",
         "config",
@@ -40,9 +40,8 @@ fn test_ensure_workspace_dirs() {
         "bin",
         "logs",
     ] {
-        assert!(tmp.join(name).is_dir(), "missing dir: {name}");
+        assert!(root.join(name).is_dir(), "missing dir: {name}");
     }
-    std::fs::remove_dir_all(&tmp).unwrap();
 }
 
 // ---- scoped env guard ----

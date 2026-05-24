@@ -302,7 +302,8 @@ mod tests {
 
     #[test]
     fn test_which_absolute_path_exists() {
-        assert!(which("/bin/sh").is_some());
+        let exe = std::env::current_exe().unwrap();
+        assert!(which(exe.to_str().unwrap()).is_some());
     }
 
     #[test]
@@ -312,7 +313,17 @@ mod tests {
 
     #[test]
     fn test_which_searches_path() {
-        assert!(which("sh").is_some());
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_str().unwrap();
+        let parent = exe.parent().unwrap();
+        let prev = std::env::var_os("PATH");
+        std::env::set_var("PATH", parent);
+        assert!(which(name).is_some(), "should find {name} in {parent:?}");
+        if let Some(p) = prev {
+            std::env::set_var("PATH", p);
+        } else {
+            std::env::remove_var("PATH");
+        }
     }
 
     #[test]

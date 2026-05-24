@@ -2,15 +2,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn unique_dir(label: &str) -> PathBuf {
-    let n = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir().join(format!("as-{label}-{n}"))
-}
 
 fn git() -> Command {
     let mut cmd = Command::new("git");
@@ -21,9 +13,7 @@ fn git() -> Command {
     cmd
 }
 
-fn start_daemon() -> (DaemonGuard, PathBuf) {
-    let dir = unique_dir("push-test");
-    std::fs::create_dir_all(&dir).unwrap();
+fn start_daemon(dir: &std::path::Path) -> Child {
     let sock = dir.join("daemon.sock");
 
     let mut child = Command::new(daemon_binary())
@@ -55,26 +45,7 @@ fn start_daemon() -> (DaemonGuard, PathBuf) {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    (
-        DaemonGuard {
-            child,
-            dir: dir.clone(),
-        },
-        sock,
-    )
-}
-
-struct DaemonGuard {
-    child: Child,
-    dir: PathBuf,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    child
 }
 
 fn daemon_binary() -> PathBuf {
@@ -99,18 +70,7 @@ fn send_request(sock: &PathBuf, request: &str) -> String {
     String::from_utf8_lossy(&response).to_string()
 }
 
-#[test]
-fn sealed_git_push_scenarios() {
-    test_git_push_rejects_main_or_master();
-    test_git_push_feature_branch_succeeds();
-}
-
-fn test_git_push_rejects_main_or_master() {
-    let (_guard, sock) = start_daemon();
-
-    let dir = unique_dir("push-protected");
-    std::fs::create_dir_all(&dir).unwrap();
-
+fn init_bare_and_working(dir: &std::path::Path) -> (PathBuf, PathBuf) {
     let bare = dir.join("bare.git");
     git()
         .args(["init", "--bare"])
@@ -124,23 +84,41 @@ fn test_git_push_rejects_main_or_master() {
         .arg(&working)
         .status()
         .expect("clone bare repo");
+    (bare, working)
+}
 
-    std::fs::write(working.join("README"), b"data").unwrap();
+fn commit_and_push(working: &std::path::Path, filename: &str, content: &[u8], branch: &str) {
+    std::fs::write(working.join(filename), content).unwrap();
     git()
-        .args(["add", "README"])
-        .current_dir(&working)
+        .args(["add", filename])
+        .current_dir(working)
         .status()
         .expect("add");
     git()
         .args(["commit", "-m", "initial"])
-        .current_dir(&working)
+        .current_dir(working)
         .status()
         .expect("commit");
     git()
-        .args(["push", "-u", "origin", "master"])
-        .current_dir(&working)
+        .args(["push", "-u", "origin", branch])
+        .current_dir(working)
         .status()
-        .expect("initial push");
+        .expect("push");
+}
+
+#[test]
+fn sealed_git_push_scenarios() {
+    test_git_push_rejects_main_or_master();
+    test_git_push_feature_branch_succeeds();
+}
+
+fn test_git_push_rejects_main_or_master() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut child = start_daemon(dir.path());
+    let sock = dir.path().join("daemon.sock");
+
+    let (_, working) = init_bare_and_working(dir.path());
+    commit_and_push(&working, "README", b"data", "master");
 
     let response = send_request(&sock, &format!("git-push {}", working.display()));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -153,45 +131,17 @@ fn test_git_push_rejects_main_or_master() {
         "expected protected branch error, got: {response}"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn test_git_push_feature_branch_succeeds() {
-    let (_guard, sock) = start_daemon();
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut child = start_daemon(dir.path());
+    let sock = dir.path().join("daemon.sock");
 
-    let dir = unique_dir("push-feature");
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let bare = dir.join("bare.git");
-    git()
-        .args(["init", "--bare"])
-        .arg(&bare)
-        .status()
-        .expect("init bare repo");
-
-    let working = dir.join("working");
-    git()
-        .args(["clone", bare.to_str().unwrap()])
-        .arg(&working)
-        .status()
-        .expect("clone bare repo");
-
-    std::fs::write(working.join("README"), b"base").unwrap();
-    git()
-        .args(["add", "README"])
-        .current_dir(&working)
-        .status()
-        .expect("add");
-    git()
-        .args(["commit", "-m", "initial"])
-        .current_dir(&working)
-        .status()
-        .expect("commit");
-    git()
-        .args(["push", "-u", "origin", "master"])
-        .current_dir(&working)
-        .status()
-        .expect("initial push");
+    let (_, working) = init_bare_and_working(dir.path());
+    commit_and_push(&working, "README", b"base", "master");
 
     git()
         .args(["checkout", "-b", "feature-x"])
@@ -224,5 +174,6 @@ fn test_git_push_feature_branch_succeeds() {
     );
     assert_eq!(v["exit_code"].as_i64(), Some(0));
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = child.kill();
+    let _ = child.wait();
 }

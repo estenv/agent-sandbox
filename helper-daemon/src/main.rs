@@ -232,14 +232,14 @@ mod tests {
 
     #[test]
     fn test_resolve_path_tilde() {
-        let home = std::env::var("HOME").unwrap();
-        assert_eq!(resolve_path("~/foo"), PathBuf::from(home).join("foo"));
+        std::env::set_var("HOME", "/home/testuser");
+        assert_eq!(resolve_path("~/foo"), PathBuf::from("/home/testuser/foo"));
     }
 
     #[test]
     fn test_resolve_path_tilde_only() {
-        let home = std::env::var("HOME").unwrap();
-        assert_eq!(resolve_path("~"), PathBuf::from(home));
+        std::env::set_var("HOME", "/home/testuser");
+        assert_eq!(resolve_path("~"), PathBuf::from("/home/testuser"));
     }
 
     #[test]

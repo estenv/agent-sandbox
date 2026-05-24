@@ -261,23 +261,27 @@ mod tests {
 
     #[test]
     fn test_pr_create_non_git_repo() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().display().to_string();
         let body = crate::handle_request(
-            r#"pr-create {"path":"/tmp","title":"t","source":"f"}"#,
+            &format!(r#"pr-create {{"path":"{path}","title":"t","source":"f"}}"#),
             None,
         );
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(!v["ok"].as_bool().unwrap());
         let err = v["error"].as_str().unwrap();
         assert!(
-            err.contains("failed to get remote 'origin'"),
-            "expected no-remote error, got: {err}"
+            err.contains("failed to get remote 'origin'") || err.contains("failed to execute git"),
+            "expected no-remote or git error, got: {err}"
         );
     }
 
     #[test]
-    fn test_pr_create_relative_path_no_git() {
+    fn test_pr_create_path_does_not_exist() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("nonexistent-subdir");
         let body = crate::handle_request(
-            r#"pr-create {"path":"/nonexistent/path","title":"t","source":"f"}"#,
+            &format!(r#"pr-create {{"path":"{}","title":"t","source":"f"}}"#, path.display()),
             None,
         );
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();

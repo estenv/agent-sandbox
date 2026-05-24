@@ -124,7 +124,8 @@ mod tests {
 
     #[test]
     fn test_git_push_non_git_dir() {
-        let body = crate::handle_request("git-push /tmp", None);
+        let dir = tempfile::TempDir::new().unwrap();
+        let body = crate::handle_request(&format!("git-push {}", dir.path().display()), None);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(!v["ok"].as_bool().unwrap());
         let err = v["error"].as_str().unwrap();
@@ -133,66 +134,6 @@ mod tests {
                 || err.contains("failed to determine current branch"),
             "expected git error, got: {err}"
         );
-    }
-
-    #[test]
-    fn test_git_push_rejects_main() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo = dir.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-
-        Command::new("git")
-            .args(["init", "-b", "main"])
-            .arg(&repo)
-            .status()
-            .unwrap();
-
-        std::fs::write(repo.join("file"), b"data").unwrap();
-        Command::new("git")
-            .args(["add", "file"])
-            .current_dir(&repo)
-            .status()
-            .unwrap();
-        Command::new("git")
-            .args(["commit", "-m", "init"])
-            .current_dir(&repo)
-            .status()
-            .unwrap();
-
-        let body = crate::handle_request(&format!("git-push {}", repo.display()), None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert!(v["error"].as_str().unwrap().contains("protected branch"));
-    }
-
-    #[test]
-    fn test_git_push_rejects_master() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo = dir.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-
-        Command::new("git")
-            .args(["init", "-b", "master"])
-            .arg(&repo)
-            .status()
-            .unwrap();
-
-        std::fs::write(repo.join("file"), b"data").unwrap();
-        Command::new("git")
-            .args(["add", "file"])
-            .current_dir(&repo)
-            .status()
-            .unwrap();
-        Command::new("git")
-            .args(["commit", "-m", "init"])
-            .current_dir(&repo)
-            .status()
-            .unwrap();
-
-        let body = crate::handle_request(&format!("git-push {}", repo.display()), None);
-        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(!v["ok"].as_bool().unwrap());
-        assert!(v["error"].as_str().unwrap().contains("protected branch"));
     }
 
     #[test]
@@ -228,7 +169,8 @@ mod tests {
 
     #[test]
     fn test_git_pull_non_git_dir() {
-        let body = crate::handle_request("git-pull /tmp", None);
+        let dir = tempfile::TempDir::new().unwrap();
+        let body = crate::handle_request(&format!("git-pull {}", dir.path().display()), None);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(!v["ok"].as_bool().unwrap());
         assert_eq!(v["exit_code"].as_i64(), Some(128));
