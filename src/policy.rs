@@ -1,3 +1,4 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
 fn host_home() -> PathBuf {
@@ -35,6 +36,41 @@ fn expand_tilde_in_arrays(value: &mut serde_json::Value, home: &Path) {
     }
 }
 
+/// Discover filesystem paths under `home` that the sandbox needs read access to:
+///   1. All `$PATH` entries that live under `home` (tool binaries)
+///   2. Well-known tool state directories (mise runtimes, user-local scripts)
+///
+/// These paths are added to the SRT `allowRead` array so they remain visible
+/// even though `~` is in `denyRead`.
+pub fn discover_allow_read_paths(home: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = Vec::new();
+
+    // 1. PATH entries under home — these are the tool binary dirs
+    if let Some(path_var) = env::var_os("PATH") {
+        for entry in env::split_paths(&path_var) {
+            if entry.starts_with(home) {
+                let resolved = entry.canonicalize().unwrap_or(entry);
+                if resolved.exists() {
+                    paths.push(resolved);
+                }
+            }
+        }
+    }
+
+    // 2. Well-known tool state directories (may not be in PATH verbatim)
+    for p in &["~/.local/share/mise", "~/.local/bin"] {
+        let exp = expand_tilde(p, home);
+        let path = PathBuf::from(exp);
+        if path.exists() {
+            paths.push(path);
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 pub const DEFAULT_SETTINGS_JSON: &str = r#"{
   "network": {
     "allowedDomains": [
@@ -47,37 +83,13 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
   },
   "filesystem": {
     "denyRead": [
-      "~/.ssh",
-      "~/.gnupg",
-      "~/.aws",
-      "~/.azure",
-      "~/.config/gh",
-      "~/.config/github-copilot",
-      "~/.config/gcloud",
-      "~/.config/azure",
-      "~/.docker",
-      "~/.kube",
-      "~/.npmrc",
-      "~/.pypirc",
-      "~/.netrc",
-      "~/.cargo/credentials",
-      "~/.cargo/credentials.toml",
-      "~/.nuget",
-      "~/.m2/settings.xml",
-      "~/.gradle/gradle.properties",
-      "~/.local/share/opencode/auth.json",
-      ".env",
-      ".env.local",
-      ".envrc",
-      ".npmrc",
-      ".pypirc",
-      "NuGet.config",
-      "nuget.config"
+      "~"
     ],
     "allowRead": [],
     "allowWrite": [
       ".",
       "~/.agent-sandbox",
+      "~/.cargo",
       "/tmp",
       "/dev/shm"
     ],
@@ -142,6 +154,31 @@ pub fn render_settings(
             if item.as_str() == Some(".") {
                 *item = serde_json::Value::String(projects_root.to_string_lossy().to_string());
             }
+        }
+    }
+
+    // Populate allowRead with discovered tool paths
+    let tool_paths = discover_allow_read_paths(&home);
+    if let Some(allow_read) = settings
+        .pointer_mut("/filesystem/allowRead")
+        .and_then(|v| v.as_array_mut())
+    {
+        for p in &tool_paths {
+            let s = p.to_string_lossy().to_string();
+            if !allow_read.iter().any(|v| v.as_str() == Some(&s)) {
+                allow_read.push(s.into());
+            }
+        }
+    }
+
+    // Only add ~/.cargo to allowWrite if it exists on the host
+    let cargo_dir = home.join(".cargo");
+    if !cargo_dir.exists() {
+        if let Some(allow_write) = settings
+            .pointer_mut("/filesystem/allowWrite")
+            .and_then(|v| v.as_array_mut())
+        {
+            allow_write.retain(|v| v.as_str() != Some(cargo_dir.to_string_lossy().as_ref()));
         }
     }
 

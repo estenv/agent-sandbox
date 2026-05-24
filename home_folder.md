@@ -1,4 +1,4 @@
-# Home folder access: current analysis
+# Home folder access: current implementation
 
 ## Problem
 
@@ -7,68 +7,78 @@ deny-list for specific credential paths (`~/.ssh`, `~/.aws`, etc.), but
 everything else in `~` is implicitly readable. A prompt-injected agent could
 browse personal files.
 
-## Goal
+## Implemented solution
 
-Restrict the sandbox to only see:
-- `projects_root` (default `~/repos`) — read-write
-- `sandbox_home` (default `~/.agent-sandbox`) — read-write
-- System paths (`/usr`, `/bin`, `/lib`, `/etc`) — read-only (for tools)
-- Tool installation paths under `~` — read-only (only what's needed)
+### Approach: block `~`, allow-read tool paths
 
-Everything else in `~` should be invisible.
-
-## Mechanism
-
-SRT supports this via its `denyRead` + `allowRead`/`allowWrite` interaction:
+The SRT policy now blocks `~` entirely and selectively allows specific
+subdirectories that tools need:
 
 ```
-denyRead:  ["/home/<user>"]   → hides entire home with --tmpfs
-allowRead: ["<tool-paths>"]    → re-binds specific tool dirs on top
-allowWrite: ["<writable>"]    → re-binds writable dirs on top
+denyRead:  ["~"]                                    → hides entire home with --tmpfs
+allowRead: [<PATH-derived bins>, <well-known dirs>]  → re-binds specific tool dirs
+allowWrite: [projects_root, ~/.agent-sandbox, ~/.cargo, /tmp, /dev/shm]
 ```
 
-The `allowRead`/`allowWrite` entries survive the `denyRead` tmpfs overlay
-because SRT re-binds them afterward (confirmed from SRT source).
+### What gets exposed
 
-## Challenge: tool paths are under `~`
+**From `$PATH` scanning:** Every PATH entry that lives under `~` is resolved
+(canonicalized) and added to `allowRead`. This captures mise runtimes, cargo
+tools, user scripts, etc. without hardcoding paths.
 
-On this system, virtually all development tools are under `~`:
+**Well-known state directories** (added unconditionally if they exist):
+- `~/.local/share/mise` — mise-managed runtimes (node, python, etc.)
+- `~/.local/bin` — user-local scripts
 
-| Tool | Path | Method |
-|------|------|--------|
-| `node`/`npm` | `~/.local/share/mise/installs/node/*/bin/` | mise |
-| `python3` | `~/.local/share/mise/installs/python/*/bin/` | mise |
-| `cargo`/`rustc` | `~/.cargo/bin/` | rustup |
-| `opencode`/`pi` | `~/.local/share/mise/installs/node/*/bin/` | mise |
-| `git` | `/usr/bin/git` | system |
-| `az` | `/usr/bin/az` | system |
+**Allow-write for cargo:** `~/.cargo` is in `allowWrite` so cargo can use the
+host's registry cache (read and write). Since the sandbox has no internet
+access, cargo credentials inside this directory cannot be exfiltrated.
 
-Blocking `~` entirely without adding tool paths to `allowRead` would break
-the agent — it can't run node/npm/python/cargo or even itself.
+### What stays hidden
 
-## Proposed approach
+Everything else under `~` that isn't in `allowRead` or `allowWrite`:
+`~/.ssh/`, `~/.aws/`, `~/.config/gh/`, `~/.local/share/opencode/auth.json`,
+`~/.local/share/keyrings/`, etc.
 
-At SRT policy render time, auto-discover tool paths from `$PATH`:
+### PATH filtering inside sandbox
 
-1. Add `"~"` to `denyRead` (blocks entire home)
-2. Scan `$PATH` for entries under `~`, resolve symlinks, add to `allowRead`
-3. Remove the now-redundant individual credential `denyRead` entries
-4. Keep existing `allowWrite` entries (projects_root, sandbox_home, etc.)
+The host `$PATH` is filtered to remove entries under `~` that aren't in the
+`allowRead` set. System paths (`/usr/bin`, `/usr/local/bin`, etc.) are
+preserved. The sandbox home `bin/` directory is prepended.
 
-This adapts to any tool installation method (mise, nvm, asdf, pyenv, rustup,
-bun, pipx, etc.) because PATH already points at the tools the user needs.
+### `prepare` installs into sandbox home
 
-## Edge cases
+The `agent-sandbox prepare <agent>` command now runs:
+```
+npm install --prefix <sandbox_home>/npm-prefix -g <package>
+```
 
-- **Tool runtime files outside PATH**: Some tools read state from non-PATH
-  locations (e.g., mise reads `~/.local/share/mise/` for tool metadata).
-  May need a small set of default `allowRead` entries for common runtimes.
-- **Symlinks in PATH**: PATH entries may be symlinks to actual installations.
-  Resolve them and add the canonical path to `allowRead`.
-- **`srt` binary**: Lives at `~/.cache/.bun/bin/srt` but runs on the host,
-  not inside the sandbox. Not affected.
+And symlinks the binary into `<sandbox_home>/bin/<cmd>`. This puts agent
+binaries in the writable sandbox home rather than relying on host tool paths.
 
-## Status
+### Cargo
 
-Deferred. This will be implemented separately after the current round of
-smaller fixes.
+`CARGO_HOME` is set to the host `~/.cargo` so cargo uses the host's registry
+cache. The helper daemon also handles `cargo fetch` for projects with
+`Cargo.toml` — running on the host (with network access) to populate the
+cache when the sandbox can't reach crates.io.
+
+### Edge cases
+
+- **Non-existent `~/.cargo`**: The `~/.cargo` `allowWrite` entry is omitted
+  if the directory doesn't exist on the host. `CARGO_HOME` is not set.
+- **Symlinks in PATH**: Resolved via `canonicalize()` before adding to
+  `allowRead`.
+- **Mise shims vs. system binaries**: Both are covered — system binaries
+  come from `/usr/bin/` (always accessible), mise shims from PATH scanning.
+
+## Security model
+
+| Threat | Mitigation |
+|--------|-----------|
+| Agent reads SSH keys | `~/.ssh/` blocked by `~` denyRead |
+| Agent reads cloud creds | `~/.aws/`, `~/.azure/`, `~/.config/gcloud/` etc. blocked |
+| Agent reads GitHub token | `~/.config/gh/` blocked |
+| Agent reads opencode auth | `~/.local/share/opencode/` not in allowRead |
+| Agent reads cargo token | `~/.cargo/credentials` is accessible (in allowWrite), but sandbox has no internet to use it |
+| Agent writes to host home | Host home is read-only (not in `allowWrite`); only `~/.cargo` and `~/.agent-sandbox` are writable |

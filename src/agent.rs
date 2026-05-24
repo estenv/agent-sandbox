@@ -1,6 +1,9 @@
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::Command;
 
 struct AgentDef {
@@ -25,12 +28,13 @@ const AGENTS: &[AgentDef] = &[
     },
 ];
 
-pub fn prepare(agent: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn prepare(agent: &str, sandbox_home: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let def = AGENTS
         .iter()
         .find(|a| a.name == agent)
         .ok_or_else(|| format!("no preparation recipe for `{agent}`"))?;
-    npm_install_global(def.package)?;
+    npm_install_prefix(def.package, &sandbox_home.join("npm-prefix"))?;
+    symlink_binaries(def.commands, sandbox_home)?;
     Ok(())
 }
 
@@ -49,16 +53,46 @@ pub fn env_vars(agent: &str) -> &[(&'static str, &'static str)] {
         .unwrap_or(&[])
 }
 
-fn npm_install_global(package: &str) -> io::Result<()> {
+pub fn is_prepared(command: &str, sandbox_home: &Path) -> bool {
+    let bin = sandbox_home.join("bin").join(command);
+    bin.exists()
+}
+
+fn npm_install_prefix(package: &str, prefix: &Path) -> io::Result<()> {
+    fs::create_dir_all(prefix)?;
     let npm = env::var_os("AGENT_SANDBOX_NPM").unwrap_or_else(|| OsString::from("npm"));
     let status = Command::new(npm)
         .arg("install")
+        .arg("--prefix")
+        .arg(prefix)
         .arg("-g")
         .arg(package)
         .status()?;
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("npm install -g {package} failed")))
+        Err(io::Error::other(format!(
+            "npm install --prefix {} -g {package} failed",
+            prefix.display()
+        )))
     }
+}
+
+fn symlink_binaries(commands: &[&str], sandbox_home: &Path) -> io::Result<()> {
+    let bin_dir = sandbox_home.join("bin");
+    fs::create_dir_all(&bin_dir)?;
+    let npm_bin = sandbox_home.join("npm-prefix").join("bin");
+
+    for cmd in commands {
+        let src = npm_bin.join(cmd);
+        let dst = bin_dir.join(cmd);
+        if src.exists() {
+            let _ = fs::remove_file(&dst);
+            fs::copy(&src, &dst)?;
+            let mut perms = fs::metadata(&dst)?.permissions();
+            perms.set_mode(perms.mode() | 0o111);
+            fs::set_permissions(&dst, perms)?;
+        }
+    }
+    Ok(())
 }

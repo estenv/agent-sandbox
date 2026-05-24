@@ -70,15 +70,42 @@ fn test_prepare_settings_expands_tilde_paths() {
         &["api.anthropic.com".to_string()],
     );
 
+    let deny_read = parsed
+        .pointer("/filesystem/denyRead")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(deny_read.len(), 1, "only \"~\" should be in denyRead");
+    let home = deny_read[0].as_str().unwrap();
+    assert!(
+        home.starts_with('/'),
+        "\"~\" should be expanded to an absolute path, got: {home}"
+    );
+    assert!(
+        home.contains('/'),
+        "home path should contain slashes, got: {home}"
+    );
+
     let allow_write = parsed
         .pointer("/filesystem/allowWrite")
         .unwrap()
         .as_array()
         .unwrap();
-    let expanded: Vec<&str> = allow_write.iter().filter_map(|v| v.as_str()).collect();
+    let has_workspace = allow_write
+        .iter()
+        .any(|v| v.as_str().is_some_and(|s| s.ends_with("/.agent-sandbox")));
     assert!(
-        expanded.iter().any(|p| p.ends_with("/.agent-sandbox")),
-        "~/.agent-sandbox should be expanded to an absolute path, got: {expanded:?}"
+        has_workspace,
+        "~/.agent-sandbox should be expanded to an absolute path"
+    );
+}
+
+#[test]
+fn test_prepare_settings_deny_read_blocks_home() {
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/d.sock",
+        &["api.anthropic.com".to_string()],
     );
 
     let deny_read = parsed
@@ -86,11 +113,60 @@ fn test_prepare_settings_expands_tilde_paths() {
         .unwrap()
         .as_array()
         .unwrap();
-    let has_abs_ssh = deny_read.iter().any(|v| {
-        v.as_str()
-            .is_some_and(|s| s.starts_with('/') && s.contains("/.ssh"))
-    });
-    assert!(has_abs_ssh, "~/.ssh should be expanded to an absolute path");
+    // The only denyRead entry is "~" (expanded to home)
+    // Individual credential paths are no longer listed because ~ blocks them all
+    assert_eq!(deny_read.len(), 1, "only ~ should be in denyRead");
+    let home: String = deny_read[0].as_str().unwrap().to_string();
+    assert!(
+        home.starts_with('/'),
+        "home path must be absolute, got: {home}"
+    );
+}
+
+#[test]
+fn test_prepare_settings_allow_read_contains_tool_paths() {
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/d.sock",
+        &["api.anthropic.com".to_string()],
+    );
+
+    let allow_read = parsed
+        .pointer("/filesystem/allowRead")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert!(
+        !allow_read.is_empty(),
+        "allowRead should contain discovered tool paths"
+    );
+    // Every entry should be an absolute path
+    for entry in allow_read {
+        let s = entry.as_str().unwrap();
+        assert!(
+            s.starts_with('/'),
+            "allowRead entry should be absolute: {s}"
+        );
+    }
+}
+
+#[test]
+fn test_prepare_settings_allow_write_contains_cargo() {
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/d.sock",
+        &["api.anthropic.com".to_string()],
+    );
+
+    let allow_write = parsed
+        .pointer("/filesystem/allowWrite")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    let has_cargo = allow_write
+        .iter()
+        .any(|v| v.as_str().is_some_and(|s| s.contains("/.cargo")));
+    assert!(has_cargo, "allowWrite should contain ~/.cargo path");
 }
 
 #[test]

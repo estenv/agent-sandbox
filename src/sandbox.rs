@@ -25,6 +25,7 @@ pub fn run(
     let sandbox_home = workspace_arg
         .map(Ok)
         .unwrap_or_else(|| config::resolve_path(&cfg.sandbox_home))?;
+    let host_home = config::home_dir()?;
 
     fs::create_dir_all(&projects_root)?;
 
@@ -48,12 +49,26 @@ pub fn run(
     configure_agent_runtime(&sandbox_home, &command[0])?;
 
     let cmd_name = command_name(&command[0]);
-    if !no_prepare && which(&cmd_name).is_none() {
+    if !no_prepare && !agent::is_prepared(&cmd_name, &sandbox_home) {
         if let Some(agent_name) = agent::known_for_command(&cmd_name) {
-            eprintln!("agent-sandbox: preparing missing agent command `{cmd_name}` on host");
-            agent::prepare(agent_name)?;
+            eprintln!("agent-sandbox: preparing missing agent `{agent_name}` in sandbox home");
+            agent::prepare(agent_name, &sandbox_home)?;
         }
     }
+
+    // Filter PATH: keep system paths (not under host home) and paths inside
+    // allow-read tool dirs. Strip out inaccessible home entries.
+    let allowed = policy::discover_allow_read_paths(&host_home);
+    let current_path = env::var_os("PATH").unwrap_or_default();
+    let sandbox_path = env::join_paths(std::iter::once(sandbox_home.join("bin")).chain(
+        env::split_paths(&current_path).filter(|p| {
+            if p.starts_with(&host_home) {
+                allowed.iter().any(|a| p.starts_with(a))
+            } else {
+                true
+            }
+        }),
+    ))?;
 
     let mut daemonized: Vec<OsString> = Vec::new();
     daemonized.push(OsString::from("env"));
@@ -61,11 +76,9 @@ pub fn run(
         "HELPER_DAEMON_SOCK={}",
         daemon_sock.display()
     )));
-    let current_path = env::var_os("PATH").unwrap_or_default();
     daemonized.push(OsString::from(format!(
-        "PATH={}/bin:{}",
-        sandbox_home.display(),
-        current_path.to_string_lossy()
+        "PATH={}",
+        sandbox_path.to_string_lossy()
     )));
     daemonized.extend(command);
 
@@ -85,6 +98,12 @@ pub fn run(
         .env("npm_config_audit", "false")
         .env("npm_config_fund", "false")
         .env("npm_config_update_notifier", "false");
+
+    // Point CARGO_HOME at the host ~/.cargo so cargo can read the registry cache
+    let host_cargo = host_home.join(".cargo");
+    if host_cargo.exists() {
+        cmd.env("CARGO_HOME", host_cargo);
+    }
 
     if let Some(agent_name) = agent::known_for_command(&cmd_name) {
         for &(key, val) in agent::env_vars(agent_name) {
@@ -229,22 +248,6 @@ fn make_executable(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn which(command: &str) -> Option<PathBuf> {
-    if command.contains('/') {
-        let path = PathBuf::from(command);
-        return path.exists().then_some(path);
-    }
-
-    let path_var = env::var_os("PATH")?;
-    for dir in env::split_paths(&path_var) {
-        let candidate = dir.join(command);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 fn command_name(command: &OsStr) -> String {
     Path::new(command)
         .file_name()
@@ -281,31 +284,5 @@ mod tests {
     #[test]
     fn test_command_name_dot_slash() {
         assert_eq!(command_name(&OsString::from("./foo")), "foo");
-    }
-
-    #[test]
-    fn test_which_absolute_path_exists() {
-        let exe = std::env::current_exe().unwrap();
-        assert!(which(exe.to_str().unwrap()).is_some());
-    }
-
-    #[test]
-    fn test_which_searches_path() {
-        struct PathGuard(Option<std::ffi::OsString>);
-        impl Drop for PathGuard {
-            fn drop(&mut self) {
-                match &self.0 {
-                    Some(p) => std::env::set_var("PATH", p),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
-        }
-
-        let exe = std::env::current_exe().unwrap();
-        let name = exe.file_name().unwrap().to_str().unwrap();
-        let parent = exe.parent().unwrap();
-        let _guard = PathGuard(std::env::var_os("PATH"));
-        std::env::set_var("PATH", parent);
-        assert!(which(name).is_some(), "should find {name} in {parent:?}");
     }
 }

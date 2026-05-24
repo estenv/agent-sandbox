@@ -22,6 +22,7 @@ pub fn dep_install(cwd: &Path) -> String {
                 .any(|e| e.path().extension().is_some_and(|ext| ext == "csproj"))
         })
         .unwrap_or(false);
+    let has_cargo_toml = cwd.join("Cargo.toml").exists();
     if found_locks.len() > 1 {
         return err_response("multiple lockfiles, ambiguous package manager");
     }
@@ -33,10 +34,12 @@ pub fn dep_install(cwd: &Path) -> String {
             "uv.lock" => ("uv", &["sync"]),
             _ => unreachable!(),
         }
+    } else if has_cargo_toml {
+        ("cargo", &["fetch"])
     } else if has_csproj {
         ("dotnet", &["restore"])
     } else {
-        return err_response("no recognizable lockfile or .csproj found");
+        return err_response("no recognizable lockfile, Cargo.toml, or .csproj found");
     };
     match cmd::run_output(prog, args, cwd, INSTALL_TIMEOUT, prog) {
         Ok(out) => {

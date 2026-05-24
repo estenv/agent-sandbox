@@ -21,10 +21,13 @@ struct Cli {
 enum CommandKind {
     /// Create default config and runtime directories.
     Init,
-    /// Prepare a known agent on the host, outside the sandbox.
+    /// Prepare a known agent in the sandbox home.
     Prepare {
         /// Known agent name: pi, or opencode (also accepts pi-agent).
         agent: String,
+        /// Sandbox-visible runtime state root. Defaults to the value in config.
+        #[arg(long)]
+        workspace: Option<PathBuf>,
     },
     /// Run any command inside the sandbox.
     Run(RunArgs),
@@ -92,8 +95,15 @@ fn real_main() -> Result<u8, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         CommandKind::Init => config::init(),
-        CommandKind::Prepare { agent } => {
-            agent::prepare(&agent)?;
+        CommandKind::Prepare { agent, workspace } => {
+            let sandbox_home = match workspace {
+                Some(p) => p,
+                None => {
+                    let cfg = config::load_config()?;
+                    config::resolve_path(&cfg.sandbox_home)?
+                }
+            };
+            agent::prepare(&agent, &sandbox_home)?;
             Ok(0)
         }
         CommandKind::Run(args) => sandbox::run(
