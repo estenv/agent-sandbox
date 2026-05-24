@@ -52,6 +52,9 @@ enum HelperCommand {
         /// PR description
         #[arg(long)]
         description: Option<String>,
+        /// Work item ID to link after PR create
+        #[arg(long)]
+        work_item: Option<i64>,
     },
     /// Install dependencies (detects package manager from lockfile)
     DepInstall {
@@ -97,12 +100,14 @@ fn main() -> ExitCode {
             source,
             target,
             description,
+            work_item,
         } => DaemonCommand::PrCreate {
             path,
             title,
             source,
             target,
             description,
+            work_item,
         },
         HelperCommand::DepInstall { path } => DaemonCommand::DepInstall { path },
         HelperCommand::WiList { path } => DaemonCommand::WiList { path },

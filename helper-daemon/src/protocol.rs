@@ -15,6 +15,7 @@ pub enum DaemonCommand {
         source: String,
         target: Option<String>,
         description: Option<String>,
+        work_item: Option<i64>,
     },
     DepInstall {
         path: String,
@@ -45,6 +46,7 @@ impl DaemonCommand {
                 source,
                 target,
                 description,
+                work_item,
             } => {
                 let mut obj = serde_json::json!({
                     "path": path,
@@ -56,6 +58,9 @@ impl DaemonCommand {
                 }
                 if let Some(d) = description {
                     obj["description"] = serde_json::json!(d);
+                }
+                if let Some(w) = work_item {
+                    obj["work_item"] = serde_json::json!(w);
                 }
                 format!("pr-create {obj}")
             }
@@ -139,6 +144,7 @@ impl DaemonCommand {
                         .get("description")
                         .and_then(|v| v.as_str())
                         .map(String::from),
+                    work_item: obj.get("work_item").and_then(|v| v.as_i64()),
                 })
             }
             "dep-install" => {
@@ -231,6 +237,7 @@ mod tests {
             source: "feature".into(),
             target: Some("main".into()),
             description: Some("desc".into()),
+            work_item: None,
         };
         let wire = cmd.to_wire();
         assert!(wire.starts_with("pr-create "));
@@ -245,6 +252,7 @@ mod tests {
             source: "feature".into(),
             target: None,
             description: None,
+            work_item: None,
         };
         let wire = cmd.to_wire();
         assert!(wire.starts_with("pr-create "));

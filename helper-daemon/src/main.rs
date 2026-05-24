@@ -154,6 +154,7 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
             source,
             target,
             description,
+            work_item,
         } => {
             let params = ado::PrParams {
                 path,
@@ -161,6 +162,7 @@ pub fn handle_request(line: &str, projects_root: Option<&Path>) -> String {
                 source,
                 target,
                 description,
+                work_item,
             };
             ado::pr_create(&params, projects_root)
         }

@@ -8,6 +8,7 @@ pub struct PrParams {
     pub source: String,
     pub target: Option<String>,
     pub description: Option<String>,
+    pub work_item: Option<i64>,
 }
 
 enum GitProvider {
@@ -145,6 +146,9 @@ fn create_ado_pr(cwd: &Path, org: &str, project: &str, repo: &str, params: &PrPa
                             .get("pullRequestId")
                             .and_then(|v| v.as_i64())
                             .unwrap_or(0);
+                        if let Some(wi) = params.work_item {
+                            let _ = link_pr_work_item(org, project, pr_id, wi);
+                        }
                         crate::ok_response(serde_json::json!({
                             "provider": "azure-devops",
                             "pull_request_id": pr_id,
@@ -298,6 +302,29 @@ fn create_ado_workitem(
             }
         }
         Err(e) => crate::err_response(format!("failed execute az: {e}")),
+    }
+}
+
+fn link_pr_work_item(org: &str, _project: &str, pr_id: i64, wi_id: i64) -> Result<(), String> {
+    let status = Command::new("az")
+        .args([
+            "repos",
+            "pr",
+            "work-item",
+            "add",
+            "--org",
+            &format!("https://dev.azure.com/{org}"),
+            "--id",
+            &pr_id.to_string(),
+            "--work-items",
+            &wi_id.to_string(),
+        ])
+        .status()
+        .map_err(|e| format!("az link failed exec: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("az pr work-item add non-zero".into())
     }
 }
 
