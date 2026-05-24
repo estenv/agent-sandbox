@@ -9,7 +9,16 @@ pub fn git() -> Command {
     cmd.stdout(Stdio::null())
         .stderr(Stdio::null())
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "");
+        .env("GIT_ASKPASS", "")
+        .env("GIT_CONFIG_COUNT", "2")
+        .env("GIT_CONFIG_KEY_0", "init.defaultBranch")
+        .env("GIT_CONFIG_VALUE_0", "main")
+        .env("GIT_CONFIG_KEY_1", "user.name")
+        .env("GIT_CONFIG_VALUE_1", "test")
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test");
     cmd
 }
 

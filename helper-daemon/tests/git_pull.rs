@@ -20,7 +20,7 @@ fn test_git_pull_in_git_repo() {
         .status()
         .expect("git commit");
     git()
-        .args(["push", "origin", "master"])
+        .args(["push", "-u", "origin", "main"])
         .current_dir(&working)
         .status()
         .expect("git push");
@@ -43,7 +43,7 @@ fn test_git_pull_in_git_repo() {
         .status()
         .expect("updater commit");
     git()
-        .args(["push", "origin", "master"])
+        .args(["push", "origin", "main"])
         .current_dir(&updater)
         .status()
         .expect("updater push");

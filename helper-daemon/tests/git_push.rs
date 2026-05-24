@@ -7,13 +7,13 @@ fn test_git_push_rejects_main_or_master() {
     let sock = dir.path().join("daemon.sock");
 
     let (_, working) = init_bare_and_working(dir.path());
-    commit_and_push(&working, "README", b"data", "master");
+    commit_and_push(&working, "README", b"data", "main");
 
     let response = send_request(&sock, &format!("git-push {}", working.display()));
     let v: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(
         !v["ok"].as_bool().unwrap(),
-        "push to master should be rejected, got: {response}"
+        "push to main should be rejected, got: {response}"
     );
     assert!(
         v["error"].as_str().unwrap().contains("protected branch"),
@@ -30,7 +30,7 @@ fn test_git_push_feature_branch_succeeds() {
     let sock = dir.path().join("daemon.sock");
 
     let (_, working) = init_bare_and_working(dir.path());
-    commit_and_push(&working, "README", b"base", "master");
+    commit_and_push(&working, "README", b"base", "main");
 
     git()
         .args(["checkout", "-b", "feature-x"])
