@@ -180,10 +180,11 @@ fn healthz_check(conn: &mut UnixStream) -> bool {
         return false;
     }
     let mut buf = [0u8; 256];
-    if conn.read(&mut buf).is_err() {
-        return false;
-    }
-    serde_json::from_slice::<serde_json::Value>(&buf)
+    let n = match conn.read(&mut buf) {
+        Ok(0) | Err(_) => return false,
+        Ok(n) => n,
+    };
+    serde_json::from_slice::<serde_json::Value>(&buf[..n])
         .ok()
         .and_then(|v| v.get("ok")?.as_bool())
         == Some(true)
