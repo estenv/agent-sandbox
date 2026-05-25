@@ -30,14 +30,6 @@ enum CommandKind {
         #[arg(long)]
         workspace: Option<PathBuf>,
     },
-    /// Install a known tool (npm package) in the sandbox home.
-    PrepareTool {
-        /// Known tool name: codegraph.
-        tool: String,
-        /// Sandbox-visible runtime state root. Defaults to the value in config.
-        #[arg(long)]
-        workspace: Option<PathBuf>,
-    },
     /// Run any command inside the sandbox.
     Run(RunArgs),
     /// Shortcut for `agent-sandbox run -- pi ...`.
@@ -56,9 +48,6 @@ struct RunArgs {
     /// Projects root directory. Defaults to the value in config.toml.
     #[arg(long)]
     projects_root: Option<PathBuf>,
-    /// Do not auto-install known missing agent commands.
-    #[arg(long)]
-    no_prepare: bool,
     /// Additional host directories the sandbox can write to (repeatable).
     #[arg(long)]
     allow_write: Vec<PathBuf>,
@@ -75,9 +64,6 @@ struct ShortcutArgs {
     /// Projects root directory. Defaults to the value in config.toml.
     #[arg(long)]
     projects_root: Option<PathBuf>,
-    /// Do not auto-install the agent if the command is missing.
-    #[arg(long)]
-    no_prepare: bool,
     /// Additional host directories the sandbox can write to (repeatable).
     #[arg(long)]
     allow_write: Vec<PathBuf>,
@@ -125,21 +111,9 @@ fn real_main() -> Result<u8> {
             agent::prepare(&agent, &sandbox_home, &host_home)?;
             Ok(0)
         }
-        CommandKind::PrepareTool { tool, workspace } => {
-            let sandbox_home = match workspace {
-                Some(p) => p,
-                None => {
-                    let cfg = config::load_config()?;
-                    config::resolve_path(&cfg.sandbox_home)?
-                }
-            };
-            agent::prepare_tool(&tool, &sandbox_home)?;
-            Ok(0)
-        }
         CommandKind::Run(args) => sandbox::run(
             args.workspace,
             args.projects_root,
-            args.no_prepare,
             args.allow_write,
             args.command,
         ),
@@ -155,7 +129,6 @@ fn run_shortcut(agent: &str, shortcut: ShortcutArgs) -> Result<u8> {
     sandbox::run(
         shortcut.workspace,
         shortcut.projects_root,
-        shortcut.no_prepare,
         shortcut.allow_write,
         command,
     )
@@ -169,7 +142,6 @@ fn healthcheck(args: HealthcheckArgs) -> Result<u8> {
     sandbox::run(
         args.workspace,
         args.projects_root,
-        true,
         args.allow_write,
         command,
     )

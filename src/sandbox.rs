@@ -9,14 +9,12 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use crate::agent;
 use crate::config;
 use crate::policy;
 
 pub fn run(
     workspace_arg: Option<PathBuf>,
     projects_root_arg: Option<PathBuf>,
-    no_prepare: bool,
     extra_write_dirs: Vec<PathBuf>,
     command: Vec<OsString>,
 ) -> Result<u8> {
@@ -41,7 +39,6 @@ pub fn run(
         env::set_current_dir(&projects_root)?;
     }
 
-    // Merge extra write dirs from config file and CLI
     let mut all_extra_dirs: Vec<PathBuf> = Vec::new();
     for d in &cfg.extra_write_dirs {
         all_extra_dirs.push(config::resolve_path(d)?);
@@ -61,31 +58,33 @@ pub fn run(
     )?;
 
     ensure_workspace_dirs(&sandbox_home)?;
-    configure_agent_runtime(&sandbox_home, &command[0])?;
 
-    let cmd_name = command_name(&command[0]);
-    if !no_prepare && !agent::is_prepared(&cmd_name, &sandbox_home) {
-        if let Some(agent_name) = agent::known_for_command(&cmd_name) {
-            eprintln!("agent-sandbox: preparing missing agent `{agent_name}` in sandbox home");
-            agent::prepare(agent_name, &sandbox_home, &host_home)?;
-        }
+    let bin_dir = sandbox_home.join("bin");
+    fs::create_dir_all(&bin_dir)?;
+    if let Ok(helper_src) = sibling_binary("agent-sandbox-helper") {
+        let helper_dst = bin_dir.join("agent-sandbox-helper");
+        let _ = fs::remove_file(&helper_dst);
+        fs::copy(&helper_src, &helper_dst)?;
+        make_executable(&helper_dst)?;
+    } else {
+        eprintln!(
+            "agent-sandbox: warning: helper binary not found — git-pull inside sandbox will fail"
+        );
     }
 
-    // Filter PATH: keep system paths (not under host home) and paths inside
-    // allow-read tool dirs. Strip out inaccessible home entries.
+    let cmd_name = command_name(&command[0]);
+
     let allowed = policy::discover_allow_read_paths(&host_home);
     let current_path = env::var_os("PATH").unwrap_or_default();
-    let sandbox_path = env::join_paths(
-        std::iter::once(sandbox_home.join("npm-prefix").join("bin"))
-            .chain(std::iter::once(sandbox_home.join("bin")))
-            .chain(env::split_paths(&current_path).filter(|p| {
-                if p.starts_with(&host_home) {
-                    allowed.iter().any(|a| p.starts_with(a))
-                } else {
-                    true
-                }
-            })),
-    )?;
+    let sandbox_path = env::join_paths(std::iter::once(sandbox_home.join("bin")).chain(
+        env::split_paths(&current_path).filter(|p| {
+            if p.starts_with(&host_home) {
+                allowed.iter().any(|a| p.starts_with(a))
+            } else {
+                true
+            }
+        }),
+    ))?;
 
     let mut daemonized: Vec<OsString> = Vec::new();
     daemonized.push(OsString::from("env"));
@@ -105,45 +104,32 @@ pub fn run(
     for arg in daemonized {
         cmd.arg(arg);
     }
-    cmd.env("HOME", sandbox_home.join("home"))
-        .env("XDG_CONFIG_HOME", sandbox_home.join("config"))
-        .env("XDG_CACHE_HOME", sandbox_home.join("cache"))
-        .env("XDG_DATA_HOME", sandbox_home.join("share"))
-        .env("TMPDIR", sandbox_home.join("tmp"))
-        .env("npm_config_cache", sandbox_home.join("npm-cache"))
-        .env("npm_config_prefix", sandbox_home.join("npm-prefix"))
-        .env("npm_config_audit", "false")
-        .env("npm_config_fund", "false")
-        .env("npm_config_update_notifier", "false");
+    cmd.env("XDG_CACHE_HOME", sandbox_home.join("cache"))
+        .env("XDG_DATA_HOME", sandbox_home.join("share"));
 
-    // Point CARGO_HOME at the host ~/.cargo so cargo can read the registry cache
     let host_cargo = host_home.join(".cargo");
     if host_cargo.exists() {
         cmd.env("CARGO_HOME", host_cargo);
     }
 
-    // Point RUSTUP_HOME at the host ~/.rustup so rustup shims can find the toolchain
     let host_rustup = host_home.join(".rustup");
     if host_rustup.exists() {
         cmd.env("RUSTUP_HOME", host_rustup);
     }
 
-    // Point NUGET_PACKAGES at the host ~/.nuget/packages so dotnet can resolve packages
     let host_nuget = host_home.join(".nuget/packages");
     if host_nuget.exists() {
         cmd.env("NUGET_PACKAGES", host_nuget);
     }
 
-    // Inject git identity from host's global config so git works inside
-    // the sandbox without needing access to any git config files.
     for (key, val) in host_git_identity() {
         cmd.env(key, val);
     }
 
-    if let Some(agent_name) = agent::known_for_command(&cmd_name) {
-        for &(key, val) in agent::env_vars(agent_name) {
-            cmd.env(key, val);
-        }
+    if cmd_name == "pi" || cmd_name == "pi-agent" {
+        cmd.env("PI_OFFLINE", "true");
+    } else if cmd_name == "opencode" {
+        cmd.env("OPENCODE_DISABLE_AUTOUPDATE", "true");
     }
 
     let mut child = cmd.spawn().unwrap_or_else(|e| {
@@ -191,19 +177,16 @@ fn healthz_check(conn: &mut UnixStream) -> bool {
 }
 
 fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()> {
-    // Already running?
     if let Ok(mut conn) = UnixStream::connect(socket_path) {
         if healthz_check(&mut conn) {
             return Ok(());
         }
     }
 
-    // Ensure parent directory exists
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    // Spawn daemon (must live next to the agent-sandbox binary)
     let mut child = Command::new(sibling_binary("agent-sandbox-helper-daemon")?)
         .arg("--socket-path")
         .arg(socket_path)
@@ -214,7 +197,6 @@ fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()>
         .stderr(std::process::Stdio::null())
         .spawn()?;
 
-    // Wait for socket to appear (poll 5s), verify liveness via health check
     for _ in 0..50 {
         if let Ok(mut conn) = UnixStream::connect(socket_path) {
             if healthz_check(&mut conn) {
@@ -231,38 +213,9 @@ fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()>
 }
 
 pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
-    for name in [
-        "home",
-        "config",
-        "cache",
-        "share",
-        "tmp",
-        "npm-cache",
-        "npm-prefix",
-        "bin",
-        "logs",
-    ] {
+    for name in ["cache", "share", "bin"] {
         fs::create_dir_all(root.join(name))?;
     }
-    Ok(())
-}
-
-fn configure_agent_runtime(workspace: &Path, _command: &OsStr) -> io::Result<()> {
-    let bin_dir = workspace.join("bin");
-    fs::create_dir_all(&bin_dir)?;
-
-    // Copy the helper binary into the sandbox
-    if let Ok(helper_src) = sibling_binary("agent-sandbox-helper") {
-        let helper_dst = bin_dir.join("agent-sandbox-helper");
-        let _ = fs::remove_file(&helper_dst);
-        fs::copy(&helper_src, &helper_dst)?;
-        make_executable(&helper_dst)?;
-    } else {
-        eprintln!(
-            "agent-sandbox: warning: helper binary not found — git-pull inside sandbox will fail"
-        );
-    }
-
     Ok(())
 }
 

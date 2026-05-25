@@ -114,8 +114,6 @@ fn test_prepare_settings_deny_read_blocks_home() {
         .unwrap()
         .as_array()
         .unwrap();
-    // The only denyRead entry is "~" (expanded to home)
-    // Individual credential paths are no longer listed because ~ blocks them all
     assert_eq!(deny_read.len(), 1, "only ~ should be in denyRead");
     let home: String = deny_read[0].as_str().unwrap().to_string();
     assert!(
@@ -141,7 +139,6 @@ fn test_prepare_settings_allow_read_contains_tool_paths() {
         !allow_read.is_empty(),
         "allowRead should contain discovered tool paths"
     );
-    // Every entry should be an absolute path
     for entry in allow_read {
         let s = entry.as_str().unwrap();
         assert!(
@@ -168,6 +165,41 @@ fn test_prepare_settings_allow_write_contains_cargo() {
         .iter()
         .any(|v| v.as_str().is_some_and(|s| s.contains("/.cargo")));
     assert!(has_cargo, "allowWrite should contain ~/.cargo path");
+}
+
+#[test]
+fn test_prepare_settings_allow_write_contains_agent_paths() {
+    let parsed = render_settings(
+        "/tmp/proj",
+        "/tmp/d.sock",
+        &["api.anthropic.com".to_string()],
+    );
+
+    let allow_write: Vec<String> = parsed
+        .pointer("/filesystem/allowWrite")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    let has_pi = allow_write.iter().any(|s| s.contains("/.pi"));
+    assert!(has_pi, "allowWrite should contain ~/.pi path");
+
+    let has_opencode_config = allow_write.iter().any(|s| s.contains("/.config/opencode"));
+    assert!(
+        has_opencode_config,
+        "allowWrite should contain ~/.config/opencode path"
+    );
+
+    let has_opencode_share = allow_write
+        .iter()
+        .any(|s| s.contains("/.local/share/opencode"));
+    assert!(
+        has_opencode_share,
+        "allowWrite should contain ~/.local/share/opencode path"
+    );
 }
 
 fn render_settings_with_extra(

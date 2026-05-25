@@ -46,17 +46,7 @@ fn test_ensure_workspace_dirs() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("workspace");
     agent_sandbox::sandbox::ensure_workspace_dirs(&root).unwrap();
-    for name in [
-        "home",
-        "config",
-        "cache",
-        "share",
-        "tmp",
-        "npm-cache",
-        "npm-prefix",
-        "bin",
-        "logs",
-    ] {
+    for name in ["cache", "share", "bin"] {
         assert!(root.join(name).is_dir(), "missing dir: {name}");
     }
 }

@@ -1,4 +1,3 @@
-use crate::agent;
 use anyhow::Result;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -17,8 +16,6 @@ fn expand_tilde(path: &str, home: &Path) -> String {
     path.to_string()
 }
 
-/// Recursively walk a JSON value and expand `~` in every string that looks
-/// like a filesystem path (strings in denyRead, allowWrite, denyWrite, allowRead).
 fn expand_tilde_in_arrays(value: &mut serde_json::Value, home: &Path) {
     match value {
         serde_json::Value::String(s) => {
@@ -38,16 +35,9 @@ fn expand_tilde_in_arrays(value: &mut serde_json::Value, home: &Path) {
     }
 }
 
-/// Discover filesystem paths under `home` that the sandbox needs read access to:
-///   1. All `$PATH` entries that live under `home` (tool binaries)
-///   2. Well-known tool state directories (mise runtimes, user-local scripts)
-///
-/// These paths are added to the SRT `allowRead` array so they remain visible
-/// even though `~` is in `denyRead`.
 pub fn discover_allow_read_paths(home: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
 
-    // 1. PATH entries under home — these are the tool binary dirs
     if let Some(path_var) = env::var_os("PATH") {
         for entry in env::split_paths(&path_var) {
             if entry.starts_with(home) {
@@ -59,7 +49,6 @@ pub fn discover_allow_read_paths(home: &Path) -> Vec<PathBuf> {
         }
     }
 
-    // 2. Well-known tool state directories (may not be in PATH verbatim)
     for p in &[
         "~/.local/share/mise",
         "~/.local/bin",
@@ -97,6 +86,9 @@ pub const DEFAULT_SETTINGS_JSON: &str = r#"{
       ".",
       "~/.agent-sandbox",
       "~/.cargo",
+      "~/.pi",
+      "~/.config/opencode",
+      "~/.local/share/opencode",
       "/tmp",
       "/dev/shm"
     ],
@@ -138,7 +130,6 @@ pub fn render_settings(
     let home = host_home();
     let mut settings: serde_json::Value = serde_json::from_str(DEFAULT_SETTINGS_JSON)?;
 
-    // Override allowed domains with user config
     if let Some(allowed) = settings
         .pointer_mut("/network/allowedDomains")
         .and_then(|v| v.as_array_mut())
@@ -149,7 +140,6 @@ pub fn render_settings(
             .collect();
     }
 
-    // Add the daemon socket's parent dir to allowWrite so bwrap bind-mounts it rw
     if let Some(sock_dir) = daemon_sock.parent() {
         push_to_array(
             &mut settings,
@@ -158,7 +148,6 @@ pub fn render_settings(
         );
     }
 
-    // Expand "." in allowWrite to the resolved projects root
     if let Some(allow_write) = settings
         .pointer_mut("/filesystem/allowWrite")
         .and_then(|v| v.as_array_mut())
@@ -170,7 +159,6 @@ pub fn render_settings(
         }
     }
 
-    // Populate allowRead with discovered tool paths
     for p in &discover_allow_read_paths(&home) {
         push_to_array(
             &mut settings,
@@ -179,7 +167,6 @@ pub fn render_settings(
         );
     }
 
-    // Only add ~/.cargo to allowWrite if it exists on the host
     let cargo_dir = home.join(".cargo");
     if !cargo_dir.exists() {
         if let Some(allow_write) = settings
@@ -190,27 +177,12 @@ pub fn render_settings(
         }
     }
 
-    // Add user-specified extra write directories to both allowRead and allowWrite.
-    // These let the host have additional dirs (e.g. agent config repos) that the
-    // sandbox can read/write, while still denying access to the rest of home.
     for extra_dir in extra_write_dirs {
         let s = extra_dir.to_string_lossy().to_string();
         push_to_array(&mut settings, "/filesystem/allowRead", s.clone());
         push_to_array(&mut settings, "/filesystem/allowWrite", s);
     }
 
-    // Add agent config dirs (e.g. ~/.pi, ~/.config/opencode) to allowWrite
-    // so they can be symlinked from the sandbox workspace into the host home.
-    for host_rel in agent::all_shared_host_dirs() {
-        push_to_array(
-            &mut settings,
-            "/filesystem/allowWrite",
-            format!("~/{host_rel}"),
-        );
-    }
-
-    // Expand all ~ paths to absolute paths against the REAL host home,
-    // before SRT overrides $HOME to the sandbox home.
     expand_tilde_in_arrays(&mut settings, &home);
 
     Ok(settings)
