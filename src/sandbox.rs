@@ -67,7 +67,7 @@ pub fn run(
     if !no_prepare && !agent::is_prepared(&cmd_name, &sandbox_home) {
         if let Some(agent_name) = agent::known_for_command(&cmd_name) {
             eprintln!("agent-sandbox: preparing missing agent `{agent_name}` in sandbox home");
-            agent::prepare(agent_name, &sandbox_home)?;
+            agent::prepare(agent_name, &sandbox_home, &host_home)?;
         }
     }
 
@@ -247,7 +247,7 @@ pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn configure_agent_runtime(workspace: &Path, command: &OsStr) -> io::Result<()> {
+fn configure_agent_runtime(workspace: &Path, _command: &OsStr) -> io::Result<()> {
     let bin_dir = workspace.join("bin");
     fs::create_dir_all(&bin_dir)?;
 
@@ -263,23 +263,6 @@ fn configure_agent_runtime(workspace: &Path, command: &OsStr) -> io::Result<()> 
         );
     }
 
-    if command_name(command).as_str() == "opencode" {
-        let cfg = workspace.join("config/opencode");
-        fs::create_dir_all(&cfg)?;
-        write_if_missing(&cfg.join("opencode.json"), "{}\n")?;
-        write_if_missing(&cfg.join("tui.json"), "{}\n")?;
-    }
-
-    Ok(())
-}
-
-fn write_if_missing(path: &Path, content: &str) -> io::Result<()> {
-    if !path.exists() {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, content)?;
-    }
     Ok(())
 }
 

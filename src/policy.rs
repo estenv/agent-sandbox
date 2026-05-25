@@ -1,3 +1,4 @@
+use crate::agent;
 use anyhow::Result;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -196,6 +197,16 @@ pub fn render_settings(
         let s = extra_dir.to_string_lossy().to_string();
         push_to_array(&mut settings, "/filesystem/allowRead", s.clone());
         push_to_array(&mut settings, "/filesystem/allowWrite", s);
+    }
+
+    // Add agent config dirs (e.g. ~/.pi, ~/.config/opencode) to allowWrite
+    // so they can be symlinked from the sandbox workspace into the host home.
+    for host_rel in agent::all_shared_host_dirs() {
+        push_to_array(
+            &mut settings,
+            "/filesystem/allowWrite",
+            format!("~/{host_rel}"),
+        );
     }
 
     // Expand all ~ paths to absolute paths against the REAL host home,

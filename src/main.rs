@@ -121,7 +121,8 @@ fn real_main() -> Result<u8> {
                     config::resolve_path(&cfg.sandbox_home)?
                 }
             };
-            agent::prepare(&agent, &sandbox_home)?;
+            let host_home = config::home_dir()?;
+            agent::prepare(&agent, &sandbox_home, &host_home)?;
             Ok(0)
         }
         CommandKind::PrepareTool { tool, workspace } => {
