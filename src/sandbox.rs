@@ -105,7 +105,8 @@ pub fn run(
         cmd.arg(arg);
     }
     cmd.env("XDG_CACHE_HOME", sandbox_home.join("cache"))
-        .env("XDG_DATA_HOME", sandbox_home.join("share"));
+        .env("XDG_DATA_HOME", sandbox_home.join("share"))
+        .env("XDG_STATE_HOME", sandbox_home.join("state"));
 
     let host_cargo = host_home.join(".cargo");
     if host_cargo.exists() {
@@ -213,7 +214,7 @@ fn ensure_daemon_running(socket_path: &Path, projects_root: &Path) -> Result<()>
 }
 
 pub fn ensure_workspace_dirs(root: &Path) -> io::Result<()> {
-    for name in ["cache", "share", "bin"] {
+    for name in ["cache", "share", "state", "bin"] {
         fs::create_dir_all(root.join(name))?;
     }
     Ok(())
